@@ -1,4 +1,8 @@
 #!/bin/bash
+
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec /bin/bash "$0" "$@"
+fi
 # Verifies that safe-chain, Takumi Guard, and Island are installed and working.
 # Run inside the devcontainer as the dev user after postCreateCommand completes.
 set -uo pipefail
@@ -11,6 +15,13 @@ WARNS=0
 pass() { echo "[PASS] $*"; PASSES=$((PASSES + 1)); }
 fail() { echo "[FAIL] $*" >&2; FAILS=$((FAILS + 1)); }
 warn() { echo "[WARN] $*"; WARNS=$((WARNS + 1)); }
+
+format_command() {
+    local formatted
+    printf -v formatted '%q ' "$@"
+    printf '%s' "${formatted% }"
+}
+
 
 # ---------------------------------------------------------------------------
 # Safe-chain
@@ -32,7 +43,7 @@ check_safe_chain() {
         return
     fi
 
-    if safe-chain --version >/dev/null 2>&1 || safe-chain --help >/dev/null 2>&1; then
+    if "$bin" --version >/dev/null 2>&1 || "$bin" --help >/dev/null 2>&1; then
         pass "binary responds"
     else
         fail "safe-chain does not respond (exit $?)"
@@ -57,8 +68,8 @@ check_takumi_guard() {
     echo ""
     echo "==> Takumi Guard"
 
-    # The registry is set in ~/.npmrc (copied from .devcontainer/.npmrc at build time).
-    local npmrc="$HOME/.npmrc"
+    # Public registry policy is installed as a root-owned system npmrc.
+    local npmrc="/etc/npmrc"
     if grep -q "^registry=https://npm.flatt.tech/" "$npmrc" 2>/dev/null; then
         pass "npm registry configured: https://npm.flatt.tech/ (in $npmrc)"
     else
@@ -130,16 +141,11 @@ check_island() {
         fail "island does not respond (exit $?)"
     fi
 
-    # Profile directories
-    local profile_base
-    profile_base="$(cd "$(dirname "$0")/../island/profiles" 2>/dev/null && pwd)" || true
+    # Profiles and enforcement assets
+    local profile_base="/etc/island/profiles"
+    local profile protected_path
 
-    if [[ -z "$profile_base" ]]; then
-        # Fall back to a path relative to the workspace
-        profile_base="/workspace/.devcontainer/island/profiles"
-    fi
-
-    for profile in claude-code codex npm-workspace pnpm-workspace git-workspace; do
+    for profile in claude-code codex npm-workspace pnpm-workspace git-workspace go-workspace; do
         if [[ -d "$profile_base/$profile" ]]; then
             pass "profile present: $profile"
         else
@@ -147,11 +153,18 @@ check_island() {
         fi
     done
 
+    for protected_path in /etc/island /usr/local/share/npm-global /usr/local/bin/island; do
+        if [[ -e "$protected_path" ]] && [[ "$(stat -c %U "$protected_path" 2>/dev/null)" == "root" ]] && [[ ! -w "$protected_path" ]]; then
+            pass "enforcement asset is root-owned and not writable: $protected_path"
+        else
+            fail "enforcement asset is missing or writable by dev: $protected_path"
+        fi
+    done
+
     # Shims
     local git_path npm_path pnpm_path
     git_path=$(command -v git 2>/dev/null || true)
-    # Use type -P to resolve the binary file on disk, bypassing any shell
-    # functions (e.g. safe-chain wraps npm/pnpm as functions in .bashrc).
+    # Use type -P to resolve files, bypassing safe-chain shell functions.
     npm_path=$(type -P npm 2>/dev/null || true)
     pnpm_path=$(type -P pnpm 2>/dev/null || true)
 
@@ -207,18 +220,22 @@ check_island() {
     # sandbox_allows: the command must succeed inside the profile (path is allowed).
     sandbox_blocks() {
         local profile="$1"; shift
-        if island run -p "$profile" -- "$@" >/dev/null 2>&1; then
-            fail "sandbox ($profile): '$*' succeeded — expected to be blocked"
+        local command_text
+        command_text=$(format_command "$@")
+        if XDG_CONFIG_HOME=/etc island run -p "$profile" -- "$@" >/dev/null 2>&1; then
+            fail "sandbox ($profile): '$command_text' succeeded — expected to be blocked"
         else
-            pass "sandbox ($profile): '$*' correctly blocked"
+            pass "sandbox ($profile): '$command_text' correctly blocked"
         fi
     }
     sandbox_allows() {
         local profile="$1"; shift
-        if island run -p "$profile" -- "$@" >/dev/null 2>&1; then
-            pass "sandbox ($profile): '$*' correctly allowed"
+        local command_text
+        command_text=$(format_command "$@")
+        if XDG_CONFIG_HOME=/etc island run -p "$profile" -- "$@" >/dev/null 2>&1; then
+            pass "sandbox ($profile): '$command_text' correctly allowed"
         else
-            fail "sandbox ($profile): '$*' failed — expected to be allowed"
+            fail "sandbox ($profile): '$command_text' failed — expected to be allowed"
         fi
     }
 

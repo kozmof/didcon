@@ -3,7 +3,15 @@
 **Target:** [`landlock-lsm/island`](https://github.com/landlock-lsm/island) sandboxing Claude Code  
 **Environment:** Simple devcontainer (Alpine-based)  
 **Date:** 2026-04-11  
-**Result:** **No successful bypass found. Island's protections are effective.**
+**Result:** **Historical point-in-time Landlock test; not a complete container security audit.**
+> **2026-06-20 security update:** The original conclusion below covered an already-sandboxed
+> Claude child process only. It did not establish that VS Code extensions, arbitrary dev-user
+> processes, the writable workspace bind mount, build inputs, or egress were secure. The
+> hardened configuration now excludes container agent extensions by default, pins agent and
+> installer inputs, verifies Go and Safe-chain downloads, keeps tool installations and Island
+> profiles root-owned, isolates agent state, restricts allowlisted egress to TCP/443, and adds
+> CPU/memory limits. Remaining limitations are documented in Section 8.
+
 
 ---
 
@@ -287,3 +295,23 @@ Note that `/usr/bin/git` still operates within the **outer Claude Code sandbox**
 2. **Remove or gate the bypass comment**: The in-code `# To bypass the sandbox, use the full path: /usr/bin/git` comment teaches users to reduce their own security. Consider removing it or replacing it with a warning about the trade-off.
 3. **Restrict `/usr/bin/git` execution**: If the `git-workspace` profile can add a rule blocking exec of `/usr/bin/git` directly (requiring the wrapper), that would close this escape hatch without removing functionality — users would need to explicitly modify the profile to run bare git.
 4. **Log wrapper bypasses**: Island could emit a warning (to a log outside the sandbox) whenever `/usr/bin/git` is executed directly, providing an audit trail for intentional bypass uses.
+
+---
+
+## 8. Current Security Model and Residual Risk (2026-06-20)
+
+The devcontainer is defense in depth, not a boundary for mutually untrusted code running as `dev`.
+
+- Island is enforced for normal CLI invocations through root-owned shims and root-owned profiles.
+- VS Code agent extensions are excluded by default because extension hosts do not inherit CLI Landlock domains.
+- The host workspace remains a writable bind mount. Sandboxed agents can intentionally modify or delete project files.
+- Any deliberately unsandboxed command executed as `dev` retains the normal dev-user access available inside the container.
+- The egress firewall is an IP allowlist restricted to TCP/443. Shared hosting and approved APIs are still possible exfiltration destinations; this is not data-loss prevention.
+- DNS is available through Docker embedded DNS over loopback. A domain-aware authenticated proxy would provide stronger destination enforcement.
+- The Chainguard free-tier base images still use moving `latest-dev` tags. Production rebuilds should resolve and review immutable digests in CI.
+- Direct paths to underlying tools remain an explicit administrative bypass. Do not use them with untrusted repositories.
+- Availability protection is bounded by PID, memory, and CPU limits, but the writable workspace can still be filled or damaged.
+
+- Landlock TCP filtering requires kernel ABI v4 (Linux 6.7 or newer). On older kernels, the external firewall is the port-enforcement layer; preflight and startup tests must be reviewed after each rebuild.
+
+The intended threat model is accidental or malicious behavior in agent-spawned child processes and package hooks. It does not treat the `dev` account, the Docker daemon, the kernel, approved remote services, or the host-mounted project as untrusted principals.

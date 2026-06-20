@@ -32,6 +32,7 @@ GITHUB_FALLBACK_DOMAINS=(
     "codeload.github.com"
     "raw.githubusercontent.com"
     "objects.githubusercontent.com"
+    "release-assets.githubusercontent.com"
 )
 
 WARNINGS=0
@@ -157,44 +158,6 @@ save_ip_domain_map() {
     mv "$tmp" "$IP_DOMAIN_MAP_FILE"
 }
 
-add_github_ranges() {
-    local set_name="$1"
-    local gh_meta
-    local added=0
-    local cidr
-
-    log "Fetching GitHub IP ranges..."
-
-    if ! gh_meta=$(wget -qO- https://api.github.com/meta 2>/dev/null); then
-        warn "failed to fetch GitHub IP ranges; using DNS fallback entries instead"
-        return 1
-    fi
-
-    if ! echo "$gh_meta" | jq -e '.web and .api and .git and .packages' >/dev/null 2>&1; then
-        warn "GitHub API response missing expected fields; using DNS fallback entries instead"
-        return 1
-    fi
-
-    while IFS= read -r cidr; do
-        [[ -z "$cidr" ]] && continue
-        if ! validate_cidr "$cidr"; then
-            warn "unexpected value from GitHub meta: $cidr"
-            continue
-        fi
-        if add_entry_to_set "$set_name" "$cidr" "GitHub metadata range"; then
-            added=1
-            IP_TO_DOMAIN["$cidr"]="github-meta-range"
-        fi
-    done < <(echo "$gh_meta" | jq -r '(.web + .api + .git + .packages)[]' 2>/dev/null | sort -u)
-
-    if [[ "$added" -eq 0 ]]; then
-        warn "GitHub metadata response did not yield any usable CIDRs"
-        return 1
-    fi
-
-    BUILD_DYNAMIC_SUCCESSES=$((BUILD_DYNAMIC_SUCCESSES + 1))
-}
-
 load_user_whitelist() {
     local set_name="$1"
     local line
@@ -224,7 +187,6 @@ build_allowed_set() {
     ipset create "$set_name" hash:net family inet >/dev/null 2>&1 || true
     ipset flush "$set_name"
 
-    add_github_ranges "$set_name" || true
 
     for domain in "${GITHUB_FALLBACK_DOMAINS[@]}"; do
         log "Resolving GitHub fallback domain: $domain..."
@@ -269,34 +231,38 @@ restore_docker_dns_rules() {
     done <<< "$docker_dns_rules"
 }
 
-detect_host_gateway() {
-    local host_ip
+add_dns_rules() {
+    local server
+    local added=0
+    local -a dns_servers=()
 
-    host_ip=$(ip route | awk '/default/ { print $3; exit }')
+    mapfile -t dns_servers < <(awk '$1 == "nameserver" { print $2 }' /etc/resolv.conf | sort -u)
+    for server in "${dns_servers[@]}"; do
+        if ! validate_ip "$server"; then
+            warn "ignoring unsupported DNS resolver address: $server"
+            continue
+        fi
 
-    if ! validate_ip "$host_ip"; then
-        echo "[firewall] ERROR: Failed to detect a valid host gateway IP" >&2
+        log "Allowing DNS only to configured resolver: $server"
+        iptables -A OUTPUT -d "$server" -p udp --dport 53 -j ACCEPT
+        iptables -A OUTPUT -d "$server" -p tcp --dport 53 -j ACCEPT
+        added=1
+    done
+
+    if [[ "$added" -eq 0 ]]; then
+        echo "[firewall] ERROR: no valid IPv4 nameserver found in /etc/resolv.conf" >&2
         return 1
     fi
-
-    printf '%s\n' "$host_ip"
 }
 
 configure_firewall_rules() {
-    local host_ip="$1"
 
-    log "Allowing host gateway: $host_ip"
+    log "Restricting egress to HTTPS destinations in the allowlist"
 
-    iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-    iptables -A INPUT  -p udp --sport 53 -m state --state ESTABLISHED,RELATED -j ACCEPT
-    iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
-    iptables -A INPUT  -p tcp --sport 53 -m state --state ESTABLISHED,RELATED -j ACCEPT
-    iptables -A OUTPUT -p tcp --dport 22 -j ACCEPT
-    iptables -A INPUT  -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
+    add_dns_rules
+
     iptables -A INPUT  -i lo -j ACCEPT
     iptables -A OUTPUT -o lo -j ACCEPT
-    iptables -A INPUT  -s "$host_ip" -j ACCEPT
-    iptables -A OUTPUT -d "$host_ip" -j ACCEPT
 
     iptables -P INPUT DROP
     iptables -P FORWARD DROP
@@ -304,7 +270,7 @@ configure_firewall_rules() {
 
     iptables -A INPUT  -m state --state ESTABLISHED,RELATED -j ACCEPT
     iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-    iptables -A OUTPUT -m set --match-set "$SET" dst -j ACCEPT
+    iptables -A OUTPUT -p tcp --dport 443 -m set --match-set "$SET" dst -j ACCEPT
     iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
 
     # IPv6 is not used in this devcontainer; block it entirely to reduce
@@ -329,6 +295,11 @@ verify_firewall() {
 
     if wget --timeout=5 -qO- https://api.github.com/zen >/dev/null 2>&1; then
         log "Reached api.github.com - OK"
+        if wget --timeout=4 -qO- http://api.github.com >/dev/null 2>&1; then
+            warn "api.github.com over port 80 should be blocked but is reachable"
+        else
+            log "Blocked api.github.com over port 80 - OK"
+        fi
     else
         warn "api.github.com should be reachable but is blocked"
     fi
@@ -386,7 +357,6 @@ write_status_file() {
 
 initial_setup() {
     local docker_dns_rules
-    local host_ip
 
     docker_dns_rules=$(capture_docker_dns_rules)
 
@@ -403,8 +373,7 @@ initial_setup() {
     build_allowed_set "$SET"
     save_ip_domain_map
 
-    host_ip=$(detect_host_gateway)
-    configure_firewall_rules "$host_ip"
+    configure_firewall_rules
     verify_firewall
     write_status_file
 

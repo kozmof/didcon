@@ -1,16 +1,40 @@
 # Profile for the Claude Code CLI.
 # Applied explicitly via the 'claude' shell alias (not auto-activated by CWD).
 #
-# workspace = true redirects XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME,
-# and TMPDIR to island-managed paths, isolating Claude's config/history from
+# workspace = false redirects XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME,
+# and TMPDIR to explicit isolated paths, isolating Claude's config/history from
 # the real ~/.claude directory.
 #
 # CLAUDE_CONFIG_DIR redirects Claude Code's own config/credentials dir away
 # from the real ~/.claude (which Landlock denies) to the island-managed
 # XDG_CONFIG_HOME.  Claude Code does not follow XDG conventions natively, so
 # this env var is the only way to make it use the isolated workspace dir.
-workspace = true
+workspace = false
 
 [[env]]
 name = "CLAUDE_CONFIG_DIR"
-literal = "/home/dev/.config/island-config-profiles/claude-code"
+literal = "/home/dev/.island/claude/config/claude"
+
+[[env]]
+name = "XDG_CONFIG_HOME"
+literal = "/home/dev/.island/claude/config"
+
+[[env]]
+name = "XDG_DATA_HOME"
+literal = "/home/dev/.island/claude/data"
+
+[[env]]
+name = "XDG_CACHE_HOME"
+literal = "/home/dev/.island/claude/cache"
+
+[[env]]
+name = "XDG_STATE_HOME"
+literal = "/home/dev/.island/claude/state"
+
+[[env]]
+name = "XDG_RUNTIME_DIR"
+literal = "/home/dev/.island/claude/runtime"
+
+[[env]]
+name = "TMPDIR"
+literal = "/home/dev/.island/claude/tmp"

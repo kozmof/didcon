@@ -6,4 +6,4 @@
 #
 # To bypass the sandbox (e.g. for 'go install' outside /workspace), use the full path:
 #   /usr/local/go/bin/go install <pkg>
-exec island run -p go-workspace -- /usr/local/go/bin/go "$@"
+XDG_CONFIG_HOME=/etc exec island run -p go-workspace -- /usr/local/go/bin/go "$@"

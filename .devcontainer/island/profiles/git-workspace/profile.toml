@@ -18,3 +18,7 @@ workspace = false
 
 [[context]]
 when_beneath = "/workspace"
+
+[[env]]
+name = "XDG_CONFIG_HOME"
+literal = "/home/dev/.config"

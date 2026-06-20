@@ -12,4 +12,4 @@
 #
 #   Use /usr/bin/git only when the git-workspace profile causes a legitimate
 #   failure (e.g. complex worktree operations).  Do not use it with untrusted repos.
-exec island run -p git-workspace -- /usr/bin/git "$@"
+XDG_CONFIG_HOME=/etc exec island run -p git-workspace -- /usr/bin/git "$@"

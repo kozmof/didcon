@@ -1,7 +1,35 @@
 # Profile for the OpenAI Codex CLI.
 # Applied explicitly via the 'codex' shell alias (not auto-activated by CWD).
 #
-# workspace = true redirects XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME,
-# and TMPDIR to island-managed paths, isolating Codex's config/history from
+# workspace = false redirects XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME,
+# and TMPDIR to explicit isolated paths, isolating Codex's config/history from
 # the real ~/.codex directory.
-workspace = true
+workspace = false
+
+[[env]]
+name = "XDG_CONFIG_HOME"
+literal = "/home/dev/.island/codex/config"
+
+[[env]]
+name = "XDG_DATA_HOME"
+literal = "/home/dev/.island/codex/data"
+
+[[env]]
+name = "XDG_CACHE_HOME"
+literal = "/home/dev/.island/codex/cache"
+
+[[env]]
+name = "XDG_STATE_HOME"
+literal = "/home/dev/.island/codex/state"
+
+[[env]]
+name = "XDG_RUNTIME_DIR"
+literal = "/home/dev/.island/codex/runtime"
+
+[[env]]
+name = "TMPDIR"
+literal = "/home/dev/.island/codex/tmp"
+
+[[env]]
+name = "CODEX_HOME"
+literal = "/home/dev/.island/codex/config/codex"

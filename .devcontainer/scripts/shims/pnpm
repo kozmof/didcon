@@ -5,4 +5,4 @@
 #
 # To bypass the sandbox (e.g. for 'pnpm install -g'), use the full path:
 #   /usr/bin/pnpm install -g <pkg>
-exec island run -p pnpm-workspace -- /usr/bin/pnpm "$@"
+XDG_CONFIG_HOME=/etc exec island run -p pnpm-workspace -- /usr/bin/pnpm "$@"

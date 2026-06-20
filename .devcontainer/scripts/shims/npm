@@ -5,4 +5,4 @@
 #
 # To bypass the sandbox (e.g. for 'npm install -g'), use the full path:
 #   /usr/local/share/npm-global/bin/npm install -g <pkg>
-exec island run -p npm-workspace -- /usr/local/share/npm-global/bin/npm "$@"
+XDG_CONFIG_HOME=/etc exec island run -p npm-workspace -- /usr/local/share/npm-global/bin/npm "$@"

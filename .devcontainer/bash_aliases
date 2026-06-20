@@ -1,11 +1,10 @@
 # island sandbox aliases (interactive terminal convenience)
 # These aliases enforce sandboxing in interactive bash sessions.
 # For scripts: shims at /usr/local/bin/claude and /usr/local/bin/codex apply the profiles.
-# For the VS Code extension: the extension's bundled native binary is patched by
-# postCreateCommand in devcontainer.json to wrap it with island.
+# VS Code agent extensions are excluded because their hosts bypass CLI profiles.
 #
 # 'claude' runs inside the claude-code Landlock profile:
-#   - XDG dirs are isolated (workspace = true) — config/history go to island-managed paths
+#   - XDG dirs and config/history use explicit isolated paths
 #   - No access to ~/.ssh, ~/.claude (real), ~/.gnupg, /opt/scripts, /var/log
-alias claude='island run -p claude-code -- /usr/local/share/npm-global/bin/claude'
-alias codex='island run -p codex -- /usr/local/share/npm-global/bin/codex'
+alias claude='/usr/local/bin/claude'
+alias codex='/usr/local/bin/codex'

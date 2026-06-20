@@ -77,3 +77,7 @@ parent = ["/home/dev/.config/go/telemetry/mode"]
 # [[net_port]]
 # allowed_access = ["connect_tcp"]
 # port = [443]
+
+[[net_port]]
+allowed_access = ["connect_tcp"]
+port = [443]

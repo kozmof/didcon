@@ -16,3 +16,6 @@ literal = "/workspace/.go-cache"
 [[env]]
 name = "GOTELEMETRY"
 literal = "off"
+[[env]]
+name = "XDG_CONFIG_HOME"
+literal = "/home/dev/.config"

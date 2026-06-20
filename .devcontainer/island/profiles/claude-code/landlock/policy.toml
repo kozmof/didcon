@@ -13,8 +13,8 @@
 #   - /var/log (firewall audit logs)
 #   - All TCP ports except 443
 #
-# island's workspace = true automatically grants read-write access to the
-# island-managed XDG dirs (XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME).
+# Explicit isolated state is granted read-write access by the
+# profile-specific path rule.
 
 abi = 6
 
@@ -53,9 +53,18 @@ parent = ["/tmp"]
 allowed_access = ["abi.all"]
 parent = ["/workspace"]
 
+# Isolated agent state and credentials
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/home/dev/.island/claude"]
+
 # Outbound HTTPS for the Anthropic API (api.anthropic.com, statsig.anthropic.com)
 # The external iptables firewall enforces the domain allowlist; Landlock only
 # needs to permit the port so node's connect() is not blocked before iptables.
 [[net_port]]
 allowed_access = ["connect_tcp"]
 port = [443]
+
+[[net_port]]
+allowed_access = ["bind_tcp"]
+port = [0]

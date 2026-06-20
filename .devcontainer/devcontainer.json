@@ -1,10 +1,14 @@
 
 {
-  "name": "Devcontainer",
+  "name": "Devcontainer with Claude Code",
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
-      "CLAUDE_CODE_VERSION": "latest"
+      // Option: specify versions explicitly
+      "CLAUDE_CODE_VERSION": "latest",
+      "CODEX_VERSION": "latest",
+      "NPM_VERSION": "11.17.0",
+      "ISLAND_REV": "05a9d699fbf30289fd2af4311becf38ceb334df2"
     }
   },
   "runArgs": [
@@ -17,6 +21,8 @@
     "--security-opt=no-new-privileges:true",
     // large tests may need to increase this value.
     "--pids-limit=512",
+    "--memory=8g",
+    "--cpus=4",
     "--init"
   ],
   "overrideCommand": false,
@@ -24,8 +30,8 @@
   "customizations": {
     "vscode": {
       "extensions": [
-        "anthropic.claude-code",
-        "openai.chatgpt"
+        "-anthropic.claude-code",
+        "-openai.chatgpt"
       ],
       "settings": {
         "workbench.colorCustomizations": {
@@ -42,5 +48,5 @@
   },
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
-  "postCreateCommand": "wget -qO- https://github.com/AikidoSec/safe-chain/releases/latest/download/install-safe-chain.sh | sh"
+  "postCreateCommand": "/opt/scripts/install-safe-chain.sh"
 }

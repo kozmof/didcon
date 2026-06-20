@@ -60,3 +60,7 @@ parent = ["/workspace"]
 [[path_beneath]]
 allowed_access = ["read_file"]
 parent = ["/home/dev/.gitconfig"]
+
+[[net_port]]
+allowed_access = ["connect_tcp"]
+port = [443]

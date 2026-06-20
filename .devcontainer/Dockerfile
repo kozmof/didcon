@@ -6,11 +6,15 @@
 FROM cgr.dev/chainguard/rust:latest-dev AS island-builder
 USER root
 ENV CARGO_HOME=/cargo
-RUN cargo install --git https://github.com/landlock-lsm/island island
+ARG ISLAND_REV=05a9d699fbf30289fd2af4311becf38ceb334df2
+RUN cargo install --git https://github.com/landlock-lsm/island --rev ${ISLAND_REV} island
 
 FROM cgr.dev/chainguard/node:latest-dev
 
+# Option: specify versions explicitly
 ARG CLAUDE_CODE_VERSION=latest
+ARG CODEX_VERSION=latest
+ARG NPM_VERSION=11.17.0
 
 # Switch to root for package installation
 USER root
@@ -42,9 +46,8 @@ ARG USERNAME=dev
 # Create non-root user
 RUN addgroup ${USERNAME} && adduser -D -G ${USERNAME} -s /bin/bash ${USERNAME}
 
-# Ensure default dev user has access to /usr/local/share
-RUN mkdir -p /usr/local/share/npm-global && \
-  chown -R ${USERNAME}:${USERNAME} /usr/local/share
+# Agent and package-manager binaries are enforcement assets. Keep them root-owned.
+RUN mkdir -p /usr/local/share/npm-global
 
 # Persist bash history.
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
@@ -56,13 +59,20 @@ RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhisto
 ENV DEVCONTAINER=true
 
 # Create workspace and config directories and set permissions
-RUN mkdir -p /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex \
+RUN mkdir -p /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/arg0 \
+    /home/${USERNAME}/.island/claude/config /home/${USERNAME}/.island/claude/data \
+    /home/${USERNAME}/.island/claude/cache /home/${USERNAME}/.island/claude/state \
+    /home/${USERNAME}/.island/claude/runtime /home/${USERNAME}/.island/claude/tmp \
+    /home/${USERNAME}/.island/codex/config /home/${USERNAME}/.island/codex/data \
+    /home/${USERNAME}/.island/codex/cache /home/${USERNAME}/.island/codex/state \
+    /home/${USERNAME}/.island/codex/runtime /home/${USERNAME}/.island/codex/tmp \
     /home/${USERNAME}/.config/npm && \
-  chown -R ${USERNAME}:${USERNAME} /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex \
-    /home/${USERNAME}/.config
+  chown -R ${USERNAME}:${USERNAME} /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/arg0 \
+    /home/${USERNAME}/.island /home/${USERNAME}/.config
 
-# Copy .npmrc so the registry is configured before npm installs
-COPY --chown=${USERNAME}:${USERNAME} .npmrc /home/${USERNAME}/.npmrc
+# Public registry policy is root-owned and contains no credentials.
+COPY .npmrc /etc/npmrc
+RUN chmod 0444 /etc/npmrc
 
 WORKDIR /workspace
 
@@ -80,22 +90,23 @@ ENV VISUAL=vi
 # Install npm itself into the npm-global prefix so the shim can find it at
 # /usr/local/share/npm-global/bin/npm, then install Claude Code.
 # Both installs happen before the npm shim is in place, so they run unsandboxed.
-RUN npm install -g npm && \
+USER root
+RUN npm install -g npm@${NPM_VERSION} && \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && \
-    npm install -g @openai/codex
+    npm install -g @openai/codex@${CODEX_VERSION} && \
+    chown -R root:root /usr/local/share/npm-global && \
+    chmod -R go-w /usr/local/share/npm-global
 
 # Switch back to root to deploy island profiles, shims, and shell aliases
 USER root
 
 # Island profiles (Landlock sandbox policies per-tool)
-COPY --chown=${USERNAME}:${USERNAME} island/profiles/ /home/${USERNAME}/.config/island/profiles/
+COPY island/profiles/ /etc/island/profiles/
+RUN chown -R root:root /etc/island && chmod -R go-w /etc/island
 
-# Binary shims: wrap npm, git, pnpm, claude, and codex with island sandboxing.
-# These shims are installed to /usr/local/bin/, which must appear before /usr/bin/
-# in PATH so that `git`, `npm`, etc. resolve to the shims rather than the real
-# binaries.  Reordering PATH to put /usr/bin first would silently bypass the
-# sandbox for those tools — the git-workspace and npm-workspace Landlock policies
-# would no longer apply to hooks and postinstall scripts.
+# Binary shims wrap npm, git, pnpm, claude, and codex with Island sandboxing.
+# /usr/local/bin must stay before /usr/bin in PATH so normal invocations use
+# these shims; direct paths to the underlying binaries remain an explicit bypass.
 COPY scripts/shims/ /usr/local/bin/
 RUN chmod +x /usr/local/bin/npm /usr/local/bin/git /usr/local/bin/pnpm /usr/local/bin/claude /usr/local/bin/codex
 

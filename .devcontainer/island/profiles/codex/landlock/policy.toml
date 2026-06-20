@@ -5,7 +5,7 @@
 #   - Safe pseudo-devices                                  (read/write)
 #   - System config under /etc and /proc/self              (read only)
 #   - /tmp and /workspace                                  (full access)
-#   - ~/.codex                                             (full access — codex hardcodes
+#   - isolated Codex state plus only ~/.codex/tmp/arg0
 #                                                           ~/.codex/tmp/arg0/ for process
 #                                                           renaming; does not use TMPDIR)
 #
@@ -14,8 +14,8 @@
 #   - /opt/scripts (container firewall scripts)
 #   - /var/log (firewall audit logs)
 #
-# island's workspace = true automatically grants read-write access to the
-# island-managed XDG dirs (XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME).
+# Explicit isolated state is granted read-write access by the
+# profile-specific path rule.
 
 abi = 6
 
@@ -52,4 +52,12 @@ parent = ["/workspace"]
 # Codex home — needed for ~/.codex/tmp/arg0/ (process renaming) and config
 [[path_beneath]]
 allowed_access = ["abi.all"]
-parent = ["/home/dev/.codex"]
+parent = ["/home/dev/.codex/tmp/arg0", "/home/dev/.island/codex"]
+
+[[net_port]]
+allowed_access = ["connect_tcp"]
+port = [443]
+
+[[net_port]]
+allowed_access = ["bind_tcp"]
+port = [0]

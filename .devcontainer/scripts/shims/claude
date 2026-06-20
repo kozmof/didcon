@@ -9,4 +9,4 @@
 #
 # To bypass the sandbox (e.g. for debugging), use the full path:
 #   /usr/local/share/npm-global/bin/claude
-exec island run -p claude-code -- /usr/local/share/npm-global/bin/claude "$@"
+XDG_CONFIG_HOME=/etc exec island run -p claude-code -- /usr/local/share/npm-global/bin/claude "$@"

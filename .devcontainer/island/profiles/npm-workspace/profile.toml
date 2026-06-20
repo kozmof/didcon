@@ -12,3 +12,7 @@ when_beneath = "/workspace"
 [[env]]
 name = "NPM_CONFIG_CACHE"
 literal = "/workspace/.npm-cache"
+
+[[env]]
+name = "XDG_CONFIG_HOME"
+literal = "/home/dev/.config"

@@ -6,11 +6,15 @@
 FROM cgr.dev/chainguard/rust:latest-dev AS island-builder
 USER root
 ENV CARGO_HOME=/cargo
-RUN cargo install --git https://github.com/landlock-lsm/island island
+ARG ISLAND_REV=05a9d699fbf30289fd2af4311becf38ceb334df2
+RUN cargo install --git https://github.com/landlock-lsm/island --rev ${ISLAND_REV} island
 
 FROM cgr.dev/chainguard/node:latest-dev
 
+# Option: specify versions explicitly
 ARG CLAUDE_CODE_VERSION=latest
+ARG CODEX_VERSION=latest
+ARG NPM_VERSION=11.17.0
 
 # Switch to root for package installation
 USER root
@@ -38,9 +42,11 @@ RUN apk update && apk add \
   && rm -rf /var/cache/apk/*
 
 ARG GO_VERSION=1.24.2
+ARG GO_SHA256=68097bd680839cbc9d464a0edce4f7c333975e27a90246890e9f1078c7e702ad
 
 # Install Go
 RUN wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -O /tmp/go.tar.gz && \
+  echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum -c - && \
   tar -C /usr/local -xzf /tmp/go.tar.gz && \
   rm /tmp/go.tar.gz
 
@@ -51,9 +57,8 @@ ARG USERNAME=dev
 # Create non-root user
 RUN addgroup ${USERNAME} && adduser -D -G ${USERNAME} -s /bin/bash ${USERNAME}
 
-# Ensure default dev user has access to /usr/local/share
-RUN mkdir -p /usr/local/share/npm-global && \
-  chown -R ${USERNAME}:${USERNAME} /usr/local/share
+# Agent and package-manager binaries are enforcement assets. Keep them root-owned.
+RUN mkdir -p /usr/local/share/npm-global
 
 # Persist bash history.
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
@@ -65,16 +70,23 @@ RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhisto
 ENV DEVCONTAINER=true
 
 # Create workspace and config directories and set permissions
-RUN mkdir -p /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex \
+RUN mkdir -p /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/arg0 \
+    /home/${USERNAME}/.island/claude/config /home/${USERNAME}/.island/claude/data \
+    /home/${USERNAME}/.island/claude/cache /home/${USERNAME}/.island/claude/state \
+    /home/${USERNAME}/.island/claude/runtime /home/${USERNAME}/.island/claude/tmp \
+    /home/${USERNAME}/.island/codex/config /home/${USERNAME}/.island/codex/data \
+    /home/${USERNAME}/.island/codex/cache /home/${USERNAME}/.island/codex/state \
+    /home/${USERNAME}/.island/codex/runtime /home/${USERNAME}/.island/codex/tmp \
     /home/${USERNAME}/.config/npm /home/${USERNAME}/.config/go/telemetry \
     /home/${USERNAME}/.cache/go-build \
     /home/${USERNAME}/go/bin /home/${USERNAME}/go/pkg && \
   echo "off" > /home/${USERNAME}/.config/go/telemetry/mode && \
-  chown -R ${USERNAME}:${USERNAME} /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex \
-    /home/${USERNAME}/.config /home/${USERNAME}/.cache /home/${USERNAME}/go
+  chown -R ${USERNAME}:${USERNAME} /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/arg0 \
+    /home/${USERNAME}/.island /home/${USERNAME}/.config /home/${USERNAME}/.cache /home/${USERNAME}/go
 
-# Copy .npmrc so the registry is configured before npm installs
-COPY --chown=${USERNAME}:${USERNAME} .npmrc /home/${USERNAME}/.npmrc
+# Public registry policy is root-owned and contains no credentials.
+COPY .npmrc /etc/npmrc
+RUN chmod 0444 /etc/npmrc
 
 WORKDIR /workspace
 
@@ -92,24 +104,28 @@ ENV VISUAL=vi
 # Go workspace
 ENV GOPATH=/home/${USERNAME}/go
 ENV PATH=$PATH:$GOPATH/bin
-# Set as an env var (not go env -w) so the island sandbox inherits it without
-# needing read access to ~/.config/go/env, which the landlock policy omits.
-# Omit ,direct fallback so blocked modules cannot bypass Takumi Guard.
+
+# Route all module fetches through Takumi Guard for supply-chain protection.
+# Omit ,direct fallback so blocked/unindexed modules cannot bypass the proxy.
 # See https://shisho.dev/docs/r/202605-takumi-guard-golang/
 ENV GOPROXY=https://golang.flatt.tech
 
 # Install npm itself into the npm-global prefix so the shim can find it at
 # /usr/local/share/npm-global/bin/npm, then install Claude Code.
 # Both installs happen before the npm shim is in place, so they run unsandboxed.
-RUN npm install -g npm && \
+USER root
+RUN npm install -g npm@${NPM_VERSION} && \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && \
-    npm install -g @openai/codex
+    npm install -g @openai/codex@${CODEX_VERSION} && \
+    chown -R root:root /usr/local/share/npm-global && \
+    chmod -R go-w /usr/local/share/npm-global
 
 # Switch back to root to deploy island profiles, shims, and shell aliases
 USER root
 
 # Island profiles (Landlock sandbox policies per-tool)
-COPY --chown=${USERNAME}:${USERNAME} island/profiles/ /home/${USERNAME}/.config/island/profiles/
+COPY island/profiles/ /etc/island/profiles/
+RUN chown -R root:root /etc/island && chmod -R go-w /etc/island
 
 # Binary shims: wrap npm, git, pnpm, claude, codex, and go with island sandboxing.
 # These shims are installed to /usr/local/bin/, which must appear before /usr/bin/

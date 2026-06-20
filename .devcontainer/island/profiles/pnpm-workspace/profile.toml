@@ -12,3 +12,7 @@ when_beneath = "/workspace"
 [[env]]
 name = "npm_config_store_dir"
 literal = "/workspace/.pnpm-store"
+
+[[env]]
+name = "XDG_CONFIG_HOME"
+literal = "/home/dev/.config"
