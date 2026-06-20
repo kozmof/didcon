@@ -4,13 +4,10 @@
 **Environment:** Simple devcontainer (Alpine-based)  
 **Date:** 2026-04-11  
 **Result:** **Historical point-in-time Landlock test; not a complete container security audit.**
-> **2026-06-20 security update:** The original conclusion below covered an already-sandboxed
-> Claude child process only. It did not establish that VS Code extensions, arbitrary dev-user
-> processes, the writable workspace bind mount, build inputs, or egress were secure. The
-> hardened configuration now excludes container agent extensions by default, pins agent and
-> installer inputs, verifies Go and Safe-chain downloads, keeps tool installations and Island
-> profiles root-owned, isolates agent state, restricts allowlisted egress to TCP/443, and adds
-> CPU/memory limits. Remaining limitations are documented in Section 8.
+> **2026-06-20 security update:** The original conclusion below covered an already-sandboxed Claude child process only.
+> It did not establish that VS Code extensions, arbitrary dev-user processes, the writable workspace bind mount, build inputs, or egress were secure.
+> The hardened configuration pins installer inputs, verifies Go and Safe-chain downloads, keeps tool installations and Island profiles root-owned, isolates agent state, restricts allowlisted egress to TCP/443, and adds CPU/memory limits.
+> Remaining limitations are documented in Section 8.
 
 
 ---
