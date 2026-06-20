@@ -81,7 +81,7 @@ RUN mkdir -p /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/a
     /home/${USERNAME}/.cache/go-build \
     /home/${USERNAME}/go/bin /home/${USERNAME}/go/pkg && \
   echo "off" > /home/${USERNAME}/.config/go/telemetry/mode && \
-  chown -R ${USERNAME}:${USERNAME} /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/arg0 \
+  chown -R ${USERNAME}:${USERNAME} /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex \
     /home/${USERNAME}/.island /home/${USERNAME}/.config /home/${USERNAME}/.cache /home/${USERNAME}/go
 
 # Public registry policy is root-owned and contains no credentials.

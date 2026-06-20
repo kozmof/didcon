@@ -67,7 +67,7 @@ RUN mkdir -p /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/a
     /home/${USERNAME}/.island/codex/cache /home/${USERNAME}/.island/codex/state \
     /home/${USERNAME}/.island/codex/runtime /home/${USERNAME}/.island/codex/tmp \
     /home/${USERNAME}/.config/npm && \
-  chown -R ${USERNAME}:${USERNAME} /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/arg0 \
+  chown -R ${USERNAME}:${USERNAME} /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex \
     /home/${USERNAME}/.island /home/${USERNAME}/.config
 
 # Public registry policy is root-owned and contains no credentials.
