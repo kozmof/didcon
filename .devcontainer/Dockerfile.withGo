@@ -92,6 +92,11 @@ ENV VISUAL=vi
 # Go workspace
 ENV GOPATH=/home/${USERNAME}/go
 ENV PATH=$PATH:$GOPATH/bin
+# Set as an env var (not go env -w) so the island sandbox inherits it without
+# needing read access to ~/.config/go/env, which the landlock policy omits.
+# Omit ,direct fallback so blocked modules cannot bypass Takumi Guard.
+# See https://shisho.dev/docs/r/202605-takumi-guard-golang/
+ENV GOPROXY=https://golang.flatt.tech
 
 # Install npm itself into the npm-global prefix so the shim can find it at
 # /usr/local/share/npm-global/bin/npm, then install Claude Code.

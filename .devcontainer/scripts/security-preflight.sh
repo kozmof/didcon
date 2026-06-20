@@ -77,6 +77,39 @@ check_takumi_guard() {
 }
 
 # ---------------------------------------------------------------------------
+# Takumi Guard (Go)
+# ---------------------------------------------------------------------------
+check_takumi_guard_golang() {
+    echo ""
+    echo "==> Takumi Guard (Go)"
+
+    # Skip gracefully on non-Go containers (shared script).
+    local go_bin=/usr/local/go/bin/go
+    if [[ ! -x "$go_bin" ]]; then
+        echo "    go not installed — skipped"
+        return
+    fi
+
+    # Read GOPROXY directly from the real binary to avoid the island shim.
+    local proxy
+    proxy=$("$go_bin" env GOPROXY 2>/dev/null || true)
+    if [[ "$proxy" == "https://golang.flatt.tech" ]]; then
+        pass "GOPROXY configured: $proxy"
+    else
+        fail "GOPROXY is '$proxy' — expected https://golang.flatt.tech (no ,direct fallback)"
+    fi
+
+    # Any HTTP response (including 4xx) means the endpoint is up.
+    local http_code
+    http_code=$(wget --timeout=5 --server-response -qO- https://golang.flatt.tech/ 2>&1 | awk '/HTTP\//{code=$2} END{print code+0}')
+    if [[ "${http_code:-0}" -gt 0 ]]; then
+        pass "golang.flatt.tech reachable (HTTP $http_code)"
+    else
+        fail "golang.flatt.tech not reachable (network or firewall issue)"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Island
 # ---------------------------------------------------------------------------
 check_island() {
@@ -235,6 +268,7 @@ check_island() {
 # ---------------------------------------------------------------------------
 check_safe_chain
 check_takumi_guard
+check_takumi_guard_golang
 check_island
 
 echo ""
