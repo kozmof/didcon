@@ -145,7 +145,7 @@ check_island() {
     local profile_base="/etc/island/profiles"
     local profile protected_path
 
-    for profile in claude-code codex npm-workspace pnpm-workspace git-workspace go-workspace; do
+    for profile in claude-code codex npm-workspace pnpm-workspace git-workspace go-workspace cargo-workspace; do
         if [[ -d "$profile_base/$profile" ]]; then
             pass "profile present: $profile"
         else
@@ -215,6 +215,31 @@ check_island() {
         fail "codex at '$codex_ref' does not appear to be the island shim"
     fi
 
+    if [[ -x /opt/rust/bin/cargo ]]; then
+        local cargo_path rustc_path
+        for protected_path in /opt/rust/bin/cargo /opt/rust/bin/rustc; do
+            if [[ "$(stat -c %U "$protected_path" 2>/dev/null)" == "root" ]] && [[ ! -w "$protected_path" ]]; then
+                pass "Rust toolchain is root-owned and not writable: $protected_path"
+            else
+                fail "Rust toolchain asset is writable or missing: $protected_path"
+            fi
+        done
+
+        cargo_path=$(type -P cargo 2>/dev/null || true)
+        rustc_path=$(type -P rustc 2>/dev/null || true)
+        if grep -q "island run -p cargo-workspace" "$cargo_path" 2>/dev/null; then
+            pass "cargo shim uses island ($cargo_path)"
+        else
+            fail "cargo at '$cargo_path' does not use the cargo-workspace profile"
+        fi
+        if grep -q "island run -p cargo-workspace" "$rustc_path" 2>/dev/null; then
+            pass "rustc shim uses island ($rustc_path)"
+        else
+            fail "rustc at '$rustc_path' does not use the cargo-workspace profile"
+        fi
+    fi
+
+
     # Sandbox enforcement tests.
     # sandbox_blocks: the command must fail inside the profile (path is blocked).
     # sandbox_allows: the command must succeed inside the profile (path is allowed).
@@ -252,8 +277,23 @@ check_island() {
     # Allowed: /workspace (project files + pnpm store), /tmp
     sandbox_blocks pnpm-workspace ls /opt/scripts
     sandbox_blocks pnpm-workspace ls /var/log
+
+
     sandbox_allows pnpm-workspace ls /workspace
     sandbox_allows pnpm-workspace ls /tmp
+
+    # cargo-workspace: protects Cargo build scripts, proc macros, and tests.
+    if [[ -x /opt/rust/bin/cargo ]]; then
+        sandbox_blocks cargo-workspace ls /opt/scripts
+        sandbox_blocks cargo-workspace ls /var/log
+        sandbox_allows cargo-workspace ls /workspace
+        sandbox_allows cargo-workspace ls /home/dev/.cargo
+        if cargo --version >/dev/null 2>&1 && rustc --version >/dev/null 2>&1; then
+            pass "sandboxed Rust toolchain responds"
+        else
+            fail "sandboxed Rust toolchain does not respond"
+        fi
+    fi
 
     # git-workspace: protects against compromised git hooks
     # Blocked: /opt/scripts, /var/log, /home/dev/.npmrc (unlike npm-workspace)

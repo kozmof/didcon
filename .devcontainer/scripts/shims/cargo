@@ -1,0 +1,3 @@
+#!/bin/sh
+# Sandbox Cargo and all child build scripts, proc macros, and tests.
+XDG_CONFIG_HOME=/etc exec island run -p cargo-workspace -- /opt/rust/bin/cargo "$@"

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Sandbox direct rustc invocations; Cargo children inherit an additional layer.
+XDG_CONFIG_HOME=/etc exec island run -p cargo-workspace -- /opt/rust/bin/rustc "$@"

@@ -1,0 +1,13 @@
+# Profile for Cargo and rustc invocations beneath /workspace.
+workspace = false
+
+[[context]]
+when_beneath = "/workspace"
+
+[[env]]
+name = "CARGO_HOME"
+literal = "/home/dev/.cargo"
+
+[[env]]
+name = "XDG_CONFIG_HOME"
+literal = "/home/dev/.config"
