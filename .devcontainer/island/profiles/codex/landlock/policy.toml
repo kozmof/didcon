@@ -29,6 +29,11 @@ scoped = ["abi.all"]
 allowed_access = ["abi.read_execute"]
 parent = ["/bin", "/lib", "/sbin", "/usr"]
 
+# Rust toolchain — needed so Codex can spawn the cargo-workspace sandbox
+# [[path_beneath]]
+# allowed_access = ["abi.read_execute"]
+# parent = ["/opt/rust"]
+
 # Safe pseudo-devices (needed by node for crypto and I/O)
 [[path_beneath]]
 allowed_access = ["read_file", "write_file"]
