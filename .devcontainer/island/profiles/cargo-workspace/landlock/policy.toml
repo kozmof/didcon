@@ -24,7 +24,7 @@ parent = ["/proc"]
 
 [[path_beneath]]
 allowed_access = ["abi.all"]
-parent = ["/tmp", "/workspace", "/home/dev/.cargo"]
+parent = ["/tmp", "/workspace", "/home/dev/.cargo", "/home/dev/.gitconfig"]
 
 [[net_port]]
 allowed_access = ["connect_tcp"]

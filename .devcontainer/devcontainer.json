@@ -1,6 +1,6 @@
 
 {
-  "name": "Devcontainer with Claude Code",
+  "name": "devcontainer",
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
