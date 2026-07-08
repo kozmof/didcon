@@ -1,6 +1,6 @@
 
 {
-  "name": "devcontainer",
+  "name": "didcon",
   "build": {
     "dockerfile": "Dockerfile",
     "args": {

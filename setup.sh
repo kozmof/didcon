@@ -13,6 +13,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${1:-$(pwd)}"
+# Strip trailing slashes so paths don't render as "foo//.devcontainer"
+# (but keep a lone "/" intact).
+while [ "${TARGET_DIR}" != "/" ] && [ "${TARGET_DIR%/}" != "${TARGET_DIR}" ]; do
+  TARGET_DIR="${TARGET_DIR%/}"
+done
 
 if [ ! -d "$TARGET_DIR" ]; then
   echo "Error: target directory '$TARGET_DIR' does not exist." >&2
