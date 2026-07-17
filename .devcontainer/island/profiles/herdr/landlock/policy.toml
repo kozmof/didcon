@@ -1,0 +1,95 @@
+# Landlock policy for herdr (terminal agent-multiplexer).
+#
+# Allows access to:
+#   - System binaries/libs under /usr, /bin, /lib, /sbin   (read + execute)
+#   - /opt/herdr (its own root-owned binary)               (read + execute)
+#   - Safe pseudo-devices incl. /dev/tty and /dev/pts      (read/write, PTY mux)
+#   - System config under /etc, and all of /proc           (read only)
+#   - ~/.bashrc and ~/.bash_aliases                        (read only, pane shells)
+#   - ~/.safe-chain                                        (read + execute, shell init)
+#   - /tmp and /workspace                                  (full access)
+#   - /home/dev/.island (all tools) — herdr spawns the claude/codex shims,
+#     whose nested island sandboxes stack (Landlock stacking is
+#     intersection-only); without this grant the inner agents could not
+#     reach their own isolated state.
+#     Trade-off: herdr itself can read other agents' isolated state and
+#     credentials.  The inner sandboxes still constrain each agent.
+#   - /home/dev/.codex/tmp/arg0 — required by nested codex process renaming.
+#   - Outbound HTTPS (port 443) for agent APIs
+#
+# Denies by omission (Landlock default-deny):
+#   - ~/.ssh, ~/.claude (real), ~/.gnupg, ~/.npmrc
+#   - /opt/scripts (container firewall scripts)
+#   - /var/log (firewall audit logs)
+#   - All TCP ports except 443
+
+abi = 6
+
+[[ruleset]]
+handled_access_fs = ["abi.all"]
+handled_access_net = ["abi.all"]
+scoped = ["abi.all"]
+
+# System binaries and libraries, plus the herdr binary itself
+[[path_beneath]]
+allowed_access = ["abi.read_execute"]
+parent = ["/bin", "/lib", "/sbin", "/usr", "/opt/herdr"]
+
+# Safe pseudo-devices
+[[path_beneath]]
+allowed_access = ["read_file", "write_file"]
+parent = ["/dev/full", "/dev/null", "/dev/random", "/dev/urandom", "/dev/zero"]
+
+# Terminal devices (herdr multiplexes PTYs; /dev/pts covers /dev/pts/ptmx)
+[[path_beneath]]
+allowed_access = ["read_file", "write_file"]
+parent = ["/dev/tty", "/dev/pts"]
+
+# System configuration (read only).
+#
+# /proc must be granted wholesale, not as /proc/self: Landlock resolves
+# "/proc/self" to /proc/<pid> of the island process at ruleset creation, so
+# the grant never matches the forked descendants herdr exists to spawn
+# (server -> pane shell -> agent).  Claude Code's runtime reads
+# /proc/self/cgroup at startup and aborts (SIGABRT) when that open returns
+# EACCES.  Regular DAC still protects sensitive /proc entries.
+[[path_beneath]]
+allowed_access = ["read_dir", "read_file", "refer"]
+parent = ["/etc", "/proc"]
+
+# Shell startup files — herdr panes spawn interactive bash, which reads these
+[[path_beneath]]
+allowed_access = ["read_file"]
+parent = ["/home/dev/.bashrc", "/home/dev/.bash_aliases"]
+
+# Safe-chain shell integration — ~/.bashrc sources scripts/init-posix.sh and
+# puts bin/ on PATH
+[[path_beneath]]
+allowed_access = ["abi.read_execute"]
+parent = ["/home/dev/.safe-chain"]
+
+# Ephemeral scratch space
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/tmp"]
+
+# Workspace
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/workspace"]
+
+# Isolated state for herdr and the agents it multiplexes (see header note)
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/home/dev/.island", "/home/dev/.codex/tmp/arg0"]
+
+# Outbound HTTPS for the agents herdr multiplexes.  The external iptables
+# firewall enforces the domain allowlist; Landlock only needs to permit the
+# port so connect() is not blocked before iptables.
+[[net_port]]
+allowed_access = ["connect_tcp"]
+port = [443]
+
+[[net_port]]
+allowed_access = ["bind_tcp"]
+port = [0]

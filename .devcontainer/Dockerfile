@@ -41,6 +41,23 @@ RUN apk update && apk add \
   su-exec \
   && rm -rf /var/cache/apk/*
 
+# Optional: herdr, a terminal agent-multiplexer (https://herdr.dev/).
+# Pinned release binary with SHA256 verification, root-owned so it cannot
+# self-update. Installed under /opt/herdr (not /usr/local/bin, which is
+# reserved for island shims); /usr/local/bin/herdr is the sandboxing shim.
+# herdr.dev is intentionally NOT firewall-whitelisted at runtime.
+ARG INSTALL_HERDR=false
+ARG HERDR_VERSION=0.7.4
+ARG HERDR_SHA256=bc0fc02d4ba500f9cac2353a43e67fe036785ecca6eb55378e050fac3c103059
+RUN if [ "$INSTALL_HERDR" = "true" ]; then \
+      wget -q https://github.com/ogulcancelik/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-x86_64 -O /tmp/herdr && \
+      echo "${HERDR_SHA256}  /tmp/herdr" | sha256sum -c - && \
+      mkdir -p /opt/herdr/bin && \
+      install -o root -g root -m 0755 /tmp/herdr /opt/herdr/bin/herdr && \
+      rm /tmp/herdr && \
+      /opt/herdr/bin/herdr --version ; \
+    fi
+
 ARG USERNAME=dev
 
 # Create non-root user
@@ -66,6 +83,9 @@ RUN mkdir -p /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/a
     /home/${USERNAME}/.island/codex/config /home/${USERNAME}/.island/codex/data \
     /home/${USERNAME}/.island/codex/cache /home/${USERNAME}/.island/codex/state \
     /home/${USERNAME}/.island/codex/runtime /home/${USERNAME}/.island/codex/tmp \
+    /home/${USERNAME}/.island/herdr/config /home/${USERNAME}/.island/herdr/data \
+    /home/${USERNAME}/.island/herdr/cache /home/${USERNAME}/.island/herdr/state \
+    /home/${USERNAME}/.island/herdr/runtime /home/${USERNAME}/.island/herdr/tmp \
     /home/${USERNAME}/.config/npm && \
   chown -R ${USERNAME}:${USERNAME} /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex \
     /home/${USERNAME}/.island /home/${USERNAME}/.config
@@ -90,10 +110,16 @@ ENV VISUAL=vi
 # Install npm itself into the npm-global prefix so the shim can find it at
 # /usr/local/share/npm-global/bin/npm, then install Claude Code.
 # Both installs happen before the npm shim is in place, so they run unsandboxed.
+# npm invoked as root runs lifecycle scripts as an unprivileged user, so
+# claude-code's postinstall cannot replace its root-owned bin/claude.exe
+# placeholder with the native binary — run install.cjs explicitly, then
+# `claude --version` so the build fails if the binary is still the stub.
 USER root
 RUN npm install -g npm@${NPM_VERSION} && \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && \
     npm install -g @openai/codex@${CODEX_VERSION} && \
+    node /usr/local/share/npm-global/lib/node_modules/@anthropic-ai/claude-code/install.cjs && \
+    /usr/local/share/npm-global/bin/claude --version && \
     chown -R root:root /usr/local/share/npm-global && \
     chmod -R go-w /usr/local/share/npm-global
 
@@ -102,13 +128,13 @@ USER root
 
 # Island profiles (Landlock sandbox policies per-tool)
 COPY island/profiles/ /etc/island/profiles/
-RUN chown -R root:root /etc/island && chmod -R go-w /etc/island
+RUN chown -R root:root /etc/island && chmod -R go-w,a+rX /etc/island
 
-# Binary shims wrap npm, git, pnpm, claude, and codex with Island sandboxing.
+# Binary shims wrap npm, git, pnpm, claude, codex, and herdr with Island sandboxing.
 # /usr/local/bin must stay before /usr/bin in PATH so normal invocations use
 # these shims; direct paths to the underlying binaries remain an explicit bypass.
 COPY scripts/shims/ /usr/local/bin/
-RUN chmod +x /usr/local/bin/npm /usr/local/bin/git /usr/local/bin/pnpm /usr/local/bin/claude /usr/local/bin/codex
+RUN chmod 755 /usr/local/bin/npm /usr/local/bin/git /usr/local/bin/pnpm /usr/local/bin/claude /usr/local/bin/codex /usr/local/bin/herdr
 
 # Shell alias: 'claude' runs via island claude-code profile
 COPY --chown=${USERNAME}:${USERNAME} bash_aliases /home/${USERNAME}/.bash_aliases

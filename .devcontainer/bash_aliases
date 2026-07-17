@@ -8,3 +8,5 @@
 #   - No access to ~/.ssh, ~/.claude (real), ~/.gnupg, /opt/scripts, /var/log
 alias claude='/usr/local/bin/claude'
 alias codex='/usr/local/bin/codex'
+# 'herdr' (optional, INSTALL_HERDR=true) runs inside the herdr Landlock profile
+alias herdr='/usr/local/bin/herdr'

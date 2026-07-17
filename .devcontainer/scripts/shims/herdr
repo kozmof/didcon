@@ -1,0 +1,14 @@
+#!/bin/sh
+# Wrapper that runs herdr (terminal agent-multiplexer) inside the island herdr
+# Landlock sandbox. Protects against herdr reading ~/.ssh, ~/.claude (real),
+# ~/.gnupg, /opt/scripts, /var/log.
+# The real binary is at /opt/herdr/bin/herdr (only present when the image was
+# built with INSTALL_HERDR=true).
+#
+# To bypass the sandbox (e.g. for debugging), use the full path:
+#   /opt/herdr/bin/herdr
+if [ ! -x /opt/herdr/bin/herdr ]; then
+    echo "herdr is not installed in this image; rebuild with INSTALL_HERDR=true" >&2
+    exit 127
+fi
+XDG_CONFIG_HOME=/etc exec island run -p herdr -- /opt/herdr/bin/herdr "$@"

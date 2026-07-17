@@ -1,0 +1,33 @@
+# Profile for herdr, a terminal agent-multiplexer (https://herdr.dev/).
+# Applied via the /usr/local/bin/herdr shim (not auto-activated by CWD).
+#
+# workspace = false redirects XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME,
+# and TMPDIR to explicit isolated paths, isolating herdr's config/state from
+# the real home directory.  herdr follows XDG conventions natively
+# (~/.config/herdr/config.toml, XDG_STATE_HOME for session state), so no
+# tool-specific env override is needed.
+workspace = false
+
+[[env]]
+name = "XDG_CONFIG_HOME"
+literal = "/home/dev/.island/herdr/config"
+
+[[env]]
+name = "XDG_DATA_HOME"
+literal = "/home/dev/.island/herdr/data"
+
+[[env]]
+name = "XDG_CACHE_HOME"
+literal = "/home/dev/.island/herdr/cache"
+
+[[env]]
+name = "XDG_STATE_HOME"
+literal = "/home/dev/.island/herdr/state"
+
+[[env]]
+name = "XDG_RUNTIME_DIR"
+literal = "/home/dev/.island/herdr/runtime"
+
+[[env]]
+name = "TMPDIR"
+literal = "/home/dev/.island/herdr/tmp"

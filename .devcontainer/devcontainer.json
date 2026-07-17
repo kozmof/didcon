@@ -8,7 +8,10 @@
       "CLAUDE_CODE_VERSION": "latest",
       "CODEX_VERSION": "latest",
       "NPM_VERSION": "11.17.0",
-      "ISLAND_REV": "05a9d699fbf30289fd2af4311becf38ceb334df2"
+      "ISLAND_REV": "05a9d699fbf30289fd2af4311becf38ceb334df2",
+      // Optional: herdr terminal agent-multiplexer (off by default).
+      // Version/sha256 are pinned in the Dockerfiles.
+      "INSTALL_HERDR": "false"
     }
   },
   "runArgs": [

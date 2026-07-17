@@ -145,7 +145,7 @@ check_island() {
     local profile_base="/etc/island/profiles"
     local profile protected_path
 
-    for profile in claude-code codex npm-workspace pnpm-workspace git-workspace go-workspace cargo-workspace; do
+    for profile in claude-code codex herdr npm-workspace pnpm-workspace git-workspace go-workspace cargo-workspace; do
         if [[ -d "$profile_base/$profile" ]]; then
             pass "profile present: $profile"
         else
@@ -213,6 +213,26 @@ check_island() {
         pass "codex shim uses island ($codex_ref)"
     else
         fail "codex at '$codex_ref' does not appear to be the island shim"
+    fi
+
+    # herdr shim — always installed; the underlying binary only exists when the
+    # image was built with INSTALL_HERDR=true.  Same alias/file handling as above.
+    local herdr_ref
+    herdr_ref=$(command -v herdr 2>/dev/null || true)
+    if echo "$herdr_ref" | grep -q "island run -p herdr"; then
+        pass "herdr shim uses island (alias)"
+    elif grep -q "island run -p herdr" "$herdr_ref" 2>/dev/null; then
+        pass "herdr shim uses island ($herdr_ref)"
+    else
+        fail "herdr at '$herdr_ref' does not appear to be the island shim"
+    fi
+
+    if [[ -x /opt/herdr/bin/herdr ]]; then
+        if [[ "$(stat -c %U /opt/herdr/bin/herdr 2>/dev/null)" == "root" ]] && [[ ! -w /opt/herdr/bin/herdr ]]; then
+            pass "herdr binary is root-owned and not writable: /opt/herdr/bin/herdr"
+        else
+            fail "herdr binary is writable or missing: /opt/herdr/bin/herdr"
+        fi
     fi
 
     if [[ -x /opt/rust/bin/cargo ]]; then
@@ -318,6 +338,31 @@ check_island() {
     sandbox_blocks codex ls /var/log
     sandbox_allows codex ls /workspace
     sandbox_allows codex ls /tmp
+
+    # herdr: isolates the agent-multiplexer from sensitive config and firewall
+    # scripts.  The profile is always present, so these run even when the
+    # herdr binary itself was not installed (INSTALL_HERDR=false).
+    # Blocked: /opt/scripts, /var/log, /home/dev/.ssh
+    # Allowed: /workspace, /tmp, /home/dev/.island (nested agent state)
+    sandbox_blocks herdr ls /opt/scripts
+    sandbox_blocks herdr ls /var/log
+    sandbox_allows herdr ls /workspace
+    sandbox_allows herdr ls /tmp
+    sandbox_allows herdr ls /home/dev/.island
+    # Forked descendants must be able to read their own /proc/<pid> — a
+    # /proc/self grant binds to the island process's pid only, and Claude
+    # Code aborts if /proc/self/cgroup is unreadable.  'true;' forces the
+    # shell to fork rather than exec, so cat runs under a different pid.
+    sandbox_allows herdr sh -c "true; cat /proc/self/cgroup"
+    sandbox_allows herdr sh -c "true; cat /home/dev/.bashrc"
+    sandbox_allows herdr sh -c "true; cat /home/dev/.safe-chain/scripts/init-posix.sh"
+    if [[ -x /opt/herdr/bin/herdr ]]; then
+        if XDG_CONFIG_HOME=/etc island run -p herdr -- /opt/herdr/bin/herdr --version >/dev/null 2>&1; then
+            pass "sandboxed herdr responds"
+        else
+            fail "sandboxed herdr does not respond"
+        fi
+    fi
 }
 
 # ---------------------------------------------------------------------------
