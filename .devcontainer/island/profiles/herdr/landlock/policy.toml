@@ -7,6 +7,7 @@
 #   - System config under /etc, and all of /proc           (read only)
 #   - ~/.bashrc and ~/.bash_aliases                        (read only, pane shells)
 #   - ~/.safe-chain                                        (read + execute, shell init)
+#   - ~/.aikido                                            (full access, scan state)
 #   - /tmp and /workspace                                  (full access)
 #   - /home/dev/.island (all tools) — herdr spawns the claude/codex shims,
 #     whose nested island sandboxes stack (Landlock stacking is
@@ -15,19 +16,22 @@
 #     Trade-off: herdr itself can read other agents' isolated state and
 #     credentials.  The inner sandboxes still constrain each agent.
 #   - /home/dev/.codex/tmp/arg0 — required by nested codex process renaming.
-#   - Outbound HTTPS (port 443) for agent APIs
+#
+# TCP is intentionally NOT restricted here (same as the *-workspace
+# policies): safe-chain wraps npm/pnpm in pane shells through a local MITM
+# proxy on an ephemeral localhost port, which a 443-only rule would block.
+# The external iptables firewall enforces the domain allowlist, and the
+# nested agent sandboxes (claude-code, codex) keep their own 443-only rules.
 #
 # Denies by omission (Landlock default-deny):
 #   - ~/.ssh, ~/.claude (real), ~/.gnupg, ~/.npmrc
 #   - /opt/scripts (container firewall scripts)
 #   - /var/log (firewall audit logs)
-#   - All TCP ports except 443
 
 abi = 6
 
 [[ruleset]]
 handled_access_fs = ["abi.all"]
-handled_access_net = ["abi.all"]
 scoped = ["abi.all"]
 
 # System binaries and libraries, plus the herdr binary itself
@@ -68,6 +72,13 @@ parent = ["/home/dev/.bashrc", "/home/dev/.bash_aliases"]
 allowed_access = ["abi.read_execute"]
 parent = ["/home/dev/.safe-chain"]
 
+# Safe-chain writes its malware-scan state here when wrapping npm/pnpm in
+# pane shells.  Pre-created in the Dockerfile so the rule can bind at
+# sandbox start (unsandboxed shells would otherwise create it lazily).
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/home/dev/.aikido"]
+
 # Ephemeral scratch space
 [[path_beneath]]
 allowed_access = ["abi.all"]
@@ -83,13 +94,3 @@ parent = ["/workspace"]
 allowed_access = ["abi.all"]
 parent = ["/home/dev/.island", "/home/dev/.codex/tmp/arg0"]
 
-# Outbound HTTPS for the agents herdr multiplexes.  The external iptables
-# firewall enforces the domain allowlist; Landlock only needs to permit the
-# port so connect() is not blocked before iptables.
-[[net_port]]
-allowed_access = ["connect_tcp"]
-port = [443]
-
-[[net_port]]
-allowed_access = ["bind_tcp"]
-port = [0]

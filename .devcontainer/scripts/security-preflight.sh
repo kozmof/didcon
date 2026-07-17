@@ -359,6 +359,9 @@ check_island() {
     sandbox_allows herdr sh -c "true; cat /proc/self/cgroup"
     sandbox_allows herdr sh -c "true; cat /home/dev/.bashrc"
     sandbox_allows herdr sh -c "true; cat /home/dev/.safe-chain/scripts/init-posix.sh"
+    # Safe-chain (Aikido) writes scan state to ~/.aikido when wrapping
+    # npm/pnpm inside pane shells
+    sandbox_allows herdr sh -c "true; touch /home/dev/.aikido/.preflight && rm /home/dev/.aikido/.preflight"
     if [[ -x /opt/herdr/bin/herdr ]]; then
         if XDG_CONFIG_HOME=/etc island run -p herdr -- /opt/herdr/bin/herdr --version >/dev/null 2>&1; then
             pass "sandboxed herdr responds"

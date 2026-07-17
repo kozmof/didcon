@@ -78,7 +78,10 @@ ENV DEVCONTAINER=true
 # Create workspace and config directories and set permissions.
 # config/codex must pre-exist: the codex island profile sets CODEX_HOME there
 # and codex errors out instead of creating a missing directory.
+# .aikido must pre-exist so the herdr Landlock policy can bind a rule to it
+# (safe-chain writes its malware-scan state there).
 RUN mkdir -p /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/arg0 \
+    /home/${USERNAME}/.aikido \
     /home/${USERNAME}/.island/claude/config /home/${USERNAME}/.island/claude/data \
     /home/${USERNAME}/.island/claude/cache /home/${USERNAME}/.island/claude/state \
     /home/${USERNAME}/.island/claude/runtime /home/${USERNAME}/.island/claude/tmp \
@@ -90,6 +93,7 @@ RUN mkdir -p /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/a
     /home/${USERNAME}/.island/herdr/runtime /home/${USERNAME}/.island/herdr/tmp \
     /home/${USERNAME}/.config/npm && \
   chown -R ${USERNAME}:${USERNAME} /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex \
+    /home/${USERNAME}/.aikido \
     /home/${USERNAME}/.island /home/${USERNAME}/.config
 
 # Public registry policy is root-owned and contains no credentials.
