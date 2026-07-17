@@ -338,6 +338,9 @@ check_island() {
     sandbox_blocks codex ls /var/log
     sandbox_allows codex ls /workspace
     sandbox_allows codex ls /tmp
+    # The profile points CODEX_HOME here and codex refuses to start when the
+    # directory is missing (it does not create it).
+    sandbox_allows codex ls /home/dev/.island/codex/config/codex
 
     # herdr: isolates the agent-multiplexer from sensitive config and firewall
     # scripts.  The profile is always present, so these run even when the

@@ -75,12 +75,14 @@ RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhisto
 # Set `DEVCONTAINER` environment variable to help with orientation
 ENV DEVCONTAINER=true
 
-# Create workspace and config directories and set permissions
+# Create workspace and config directories and set permissions.
+# config/codex must pre-exist: the codex island profile sets CODEX_HOME there
+# and codex errors out instead of creating a missing directory.
 RUN mkdir -p /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/arg0 \
     /home/${USERNAME}/.island/claude/config /home/${USERNAME}/.island/claude/data \
     /home/${USERNAME}/.island/claude/cache /home/${USERNAME}/.island/claude/state \
     /home/${USERNAME}/.island/claude/runtime /home/${USERNAME}/.island/claude/tmp \
-    /home/${USERNAME}/.island/codex/config /home/${USERNAME}/.island/codex/data \
+    /home/${USERNAME}/.island/codex/config/codex /home/${USERNAME}/.island/codex/data \
     /home/${USERNAME}/.island/codex/cache /home/${USERNAME}/.island/codex/state \
     /home/${USERNAME}/.island/codex/runtime /home/${USERNAME}/.island/codex/tmp \
     /home/${USERNAME}/.island/herdr/config /home/${USERNAME}/.island/herdr/data \
