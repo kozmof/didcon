@@ -96,6 +96,19 @@ RUN mkdir -p /workspace /home/${USERNAME}/.claude /home/${USERNAME}/.codex/tmp/a
     /home/${USERNAME}/.aikido \
     /home/${USERNAME}/.island /home/${USERNAME}/.config
 
+# Codex updates are centrally managed: the CLI is a root-owned enforcement
+# asset installed at build time, so its self-update (`npm install -g @openai/codex`)
+# cannot write to /usr/local/share/npm-global and fails with EACCES. Seed
+# config.toml in both CODEX_HOME locations — the island shim's home and the
+# default ~/.codex used by the direct-path bypass — so codex never offers an
+# upgrade it structurally cannot perform.
+RUN printf 'check_for_update_on_startup = false\n' | tee \
+      /home/${USERNAME}/.island/codex/config/codex/config.toml \
+      /home/${USERNAME}/.codex/config.toml >/dev/null && \
+    chown ${USERNAME}:${USERNAME} \
+      /home/${USERNAME}/.island/codex/config/codex/config.toml \
+      /home/${USERNAME}/.codex/config.toml
+
 # Public registry policy is root-owned and contains no credentials.
 COPY .npmrc /etc/npmrc
 RUN chmod 0444 /etc/npmrc
