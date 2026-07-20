@@ -1,1 +1,38 @@
 A minimum defence in depth devcontainer
+
+Usage
+-----
+
+Clone this repository, then use one of the helper scripts to place or update
+the .devcontainer in your project.
+
+Fresh install (setup.sh)
+    Copies .devcontainer into a project that doesn't have one yet.
+
+        git clone <this-repo> /tmp/didcon
+        /tmp/didcon/setup.sh /path/to/your/project
+
+    TARGET_DIR defaults to the current directory if omitted. The script
+    refuses to run if the target already has a .devcontainer, so it never
+    overwrites an existing setup -- use patch.sh for that.
+
+Update an existing one (patch.sh)
+    Interactively patches a project's existing .devcontainer with the latest
+    version from this repository.
+
+        git clone <this-repo> /tmp/didcon
+        /tmp/didcon/patch.sh /path/to/your/project
+
+    TARGET_DIR defaults to the current directory if omitted. For every file
+    that differs (or is new) it shows a diff and asks, file by file, whether
+    to apply it:
+
+        [y]es    patch this file
+        [n]o     skip it (default)
+        [a]ll    patch this and every remaining file without asking
+        [q]uit   stop now
+
+    Nothing is overwritten without your confirmation, so hand-crafted local
+    changes (custom whitelists, tweaked policies, ...) are preserved when you
+    answer "no". Files that exist only in your project are reported at the end
+    but never deleted.

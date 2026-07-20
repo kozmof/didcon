@@ -7,8 +7,8 @@
 #   TARGET_DIR  Directory to install .devcontainer into (default: current directory)
 #
 # Example:
-#   git clone <this-repo> /tmp/devcontainer-with-claude
-#   /tmp/devcontainer-with-claude/setup.sh /path/to/your/project
+#   git clone <this-repo> /tmp/didcon
+#   /tmp/didcon/setup.sh /path/to/your/project
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
