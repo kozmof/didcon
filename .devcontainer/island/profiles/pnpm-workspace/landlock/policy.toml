@@ -62,3 +62,7 @@ parent = ["/workspace"]
 # allowed_access = ["abi.all"]
 # parent = ["/home/dev/.cache/go-build", "/home/dev/go/pkg"]
 
+# Safe-chain may initialize or rotate its local CA certificate
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/home/dev/.safe-chain/certs"]

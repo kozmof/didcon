@@ -72,6 +72,11 @@ parent = ["/home/dev/.bashrc", "/home/dev/.bash_aliases"]
 allowed_access = ["abi.read_execute"]
 parent = ["/home/dev/.safe-chain"]
 
+# Safe-chain may initialize or rotate its local CA certificate
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/home/dev/.safe-chain/certs"]
+
 # Safe-chain writes its malware-scan state here when wrapping npm/pnpm in
 # pane shells.  Pre-created in the Dockerfile so the rule can bind at
 # sandbox start (unsandboxed shells would otherwise create it lazily).
@@ -93,4 +98,3 @@ parent = ["/workspace"]
 [[path_beneath]]
 allowed_access = ["abi.all"]
 parent = ["/home/dev/.island", "/home/dev/.codex/tmp/arg0"]
-

@@ -57,3 +57,7 @@ parent = ["/tmp"]
 allowed_access = ["abi.all"]
 parent = ["/workspace"]
 
+# Safe-chain may initialize or rotate its local CA certificate
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/home/dev/.safe-chain/certs"]
