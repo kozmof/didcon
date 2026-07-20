@@ -3,6 +3,9 @@
 #
 # workspace = false preserves the real XDG dirs so pnpm can reach ~/.config/npm.
 # pnpm store is redirected to /workspace/.pnpm-store to avoid needing ~/.local access.
+# pnpm data dir (managed package-manager versions from the packageManager field,
+# under .tools) is redirected to /workspace/.pnpm-data for the same reason —
+# otherwise it resolves to a Landlock-denied path (e.g. ~/.island/herdr/data/pnpm).
 
 workspace = false
 
@@ -16,3 +19,7 @@ literal = "/workspace/.pnpm-store"
 [[env]]
 name = "XDG_CONFIG_HOME"
 literal = "/home/dev/.config"
+
+[[env]]
+name = "XDG_DATA_HOME"
+literal = "/workspace/.pnpm-data"
