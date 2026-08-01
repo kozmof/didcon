@@ -52,5 +52,13 @@
   },
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  // Keep host-executed control surfaces immutable from inside the container.
+  // The Git index and refs remain writable, so normal add/commit operations work.
+  // These mounts require a standard Git checkout with a .git directory.
+  "mounts": [
+    "source=${localWorkspaceFolder}/.devcontainer,target=/workspace/.devcontainer,type=bind,readonly",
+    "source=${localWorkspaceFolder}/.git/config,target=/workspace/.git/config,type=bind,readonly",
+    "source=${localWorkspaceFolder}/.git/hooks,target=/workspace/.git/hooks,type=bind,readonly"
+  ],
   "postCreateCommand": "/opt/scripts/install-safe-chain.sh"
 }

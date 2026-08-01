@@ -11,10 +11,19 @@ IFS=$'\n\t'
 PASSES=0
 FAILS=0
 WARNS=0
+NESTED_SANDBOX=0
 
 pass() { echo "[PASS] $*"; PASSES=$((PASSES + 1)); }
 fail() { echo "[FAIL] $*" >&2; FAILS=$((FAILS + 1)); }
 warn() { echo "[WARN] $*"; WARNS=$((WARNS + 1)); }
+
+# Landlock restrictions are inherited and cannot be relaxed. If this script is
+# launched by an already-sandboxed agent, broader profile allow-tests and
+# Safe-chain checks can produce false failures because the parent policy wins.
+if ! ls /var/log >/dev/null 2>&1; then
+    NESTED_SANDBOX=1
+    warn "existing filesystem sandbox detected; parent-denied positive-access checks will be skipped"
+fi
 
 format_command() {
     local formatted
@@ -29,6 +38,11 @@ format_command() {
 check_safe_chain() {
     echo ""
     echo "==> safe-chain"
+
+    if [[ "$NESTED_SANDBOX" -eq 1 ]]; then
+        warn "safe-chain execution skipped inside an existing agent sandbox"
+        return
+    fi
 
     # safe-chain installs to ~/.safe-chain/bin/ and adds it to PATH via .bashrc.
     # When the script runs under sh (no .bashrc), fall back to the known install path.
@@ -382,6 +396,10 @@ check_island() {
     sandbox_blocks herdr ls /var/log
     sandbox_allows herdr ls /workspace
     sandbox_allows herdr ls /tmp
+    if [[ "$NESTED_SANDBOX" -eq 1 ]]; then
+        warn "herdr positive-access checks skipped because the parent sandbox is narrower"
+        return
+    fi
     sandbox_allows herdr ls /home/dev/.island
     # Forked descendants must be able to read their own /proc/<pid> — a
     # /proc/self grant binds to the island process's pid only, and Claude

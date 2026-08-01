@@ -9,6 +9,23 @@
 > The hardened configuration pins installer inputs, verifies Go and Safe-chain downloads, keeps tool installations and Island profiles root-owned, isolates agent state, restricts allowlisted egress to TCP/443, and adds CPU/memory limits.
 > Remaining limitations are documented in Section 8.
 
+> **2026-08-01 host-boundary audit and hardening:** Active testing found that the
+> container had no visible Docker socket or SUID/SGID binaries, could not enter
+> PID 1 namespaces, and could not reach the Docker gateway or cloud metadata.
+> It also found three host-facing risks outside the original Landlock scope:
+> writable Git/devcontainer control files, arbitrary recursive DNS, and
+> connectable VS Code/X11/Remote Containers sockets. The configuration now
+> bind-mounts `.devcontainer`, `.git/config`, and `.git/hooks` read-only,
+> keeps agent installations root-owned, builds Island with `--locked`, fails startup on firewall
+> deny-test or IPv6-policy failure, and makes preflight nesting-aware.
+>
+> These changes do not make a writable host checkout safe for fully malicious
+> code. Project scripts and source files can still be changed and later run on
+> the host. DNS remains an exfiltration channel, and editor/X11 IPC remains
+> reachable because the development environment exposes sockets beneath
+> `/tmp`. Strong isolation requires a container-volume checkout with reviewed
+> patch export, plus removal or mediation of host IPC and DNS.
+
 
 ---
 

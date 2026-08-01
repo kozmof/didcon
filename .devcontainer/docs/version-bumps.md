@@ -1,7 +1,8 @@
 # Bumping pinned tool versions
 
 Every agent, package manager, and downloaded binary in this devcontainer is
-pinned and installed at **build time**, then left root-owned. The dev user
+installed at **build time**, then left root-owned. Claude Code and Codex track
+the npm `latest` dist-tag by default; the remaining listed tools are pinned. The dev user
 cannot overwrite these binaries, so none of them can self-update from inside a
 running container — updating is done by editing a pinned version and rebuilding
 the image.
@@ -21,8 +22,8 @@ build.
 
 | Tool | ARG(s) | Default | Notes |
 |---|---|---|---|
-| Claude Code | `CLAUDE_CODE_VERSION` | `latest` | npm dist-tag or exact version |
-| Codex | `CODEX_VERSION` | `latest` | npm dist-tag or exact version |
+| Claude Code | `CLAUDE_CODE_VERSION` | `latest` | npm latest dist-tag |
+| Codex | `CODEX_VERSION` | `latest` | npm latest dist-tag |
 | npm | `NPM_VERSION` | `11.17.0` | |
 | island | `ISLAND_REV` | git SHA | Built from source; pin a full commit SHA |
 | herdr | `HERDR_VERSION` + `HERDR_SHA256` | `0.7.4` | Optional (`INSTALL_HERDR`); verified download |

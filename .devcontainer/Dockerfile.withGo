@@ -7,7 +7,7 @@ FROM cgr.dev/chainguard/rust:latest-dev AS island-builder
 USER root
 ENV CARGO_HOME=/cargo
 ARG ISLAND_REV=05a9d699fbf30289fd2af4311becf38ceb334df2
-RUN cargo install --git https://github.com/landlock-lsm/island --rev ${ISLAND_REV} island
+RUN cargo install --locked --git https://github.com/landlock-lsm/island --rev ${ISLAND_REV} island
 
 FROM cgr.dev/chainguard/node:latest-dev
 

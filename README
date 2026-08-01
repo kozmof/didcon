@@ -75,3 +75,23 @@ Checking a running container
     Verifies safe-chain, the registry policy, island profiles, the shims, and
     that each sandbox blocks and allows what it should. Run it as the dev user
     after postCreateCommand finishes.
+
+Host control surfaces
+---------------------
+
+The standard configuration bind-mounts `.devcontainer`, `.git/config`, and
+`.git/hooks` read-only inside the container. This prevents an agent or package
+hook from persisting code that would execute during a later host-side rebuild
+or Git command, while leaving the Git index and refs writable for normal commits.
+
+These protective mounts assume a conventional checkout with a `.git`
+directory. Git worktrees (where `.git` is a file) need equivalent host-side
+read-only mounts adapted to their actual Git directory.
+
+This blocks the most direct hook and rebuild-persistence paths, but it does not
+turn a writable host checkout into a hostile-code boundary. An agent can still
+change project scripts that a user later runs on the host. For fully untrusted
+repositories, clone into a container volume and export only reviewed patches.
+The DNS resolver and VS Code/X11 sockets are also integration channels rather
+than security boundaries; remove or proxy them when the threat model includes
+data exfiltration or hostile container processes.

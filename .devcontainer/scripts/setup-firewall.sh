@@ -276,22 +276,26 @@ configure_firewall_rules() {
     iptables -A OUTPUT -p tcp --dport 443 -m set --match-set "$SET" dst -j ACCEPT
     iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
 
-    # IPv6 is not used in this devcontainer; block it entirely to reduce
-    # attack surface and prevent IPv6 as a bypass path for the IPv4-only allowlist.
-    ip6tables -F 2>/dev/null || true
-    ip6tables -P INPUT DROP 2>/dev/null || true
-    ip6tables -P FORWARD DROP 2>/dev/null || true
-    ip6tables -P OUTPUT DROP 2>/dev/null || true
-    ip6tables -A INPUT -i lo -j ACCEPT 2>/dev/null || true
-    ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
-    ip6tables -A OUTPUT -j REJECT --reject-with icmp6-adm-prohibited 2>/dev/null || true
+    # IPv6 is not used in this devcontainer. These commands are deliberately
+    # fail-closed: silently ignoring an ip6tables failure could leave an IPv6
+    # route outside the IPv4-only destination allowlist.
+    ip6tables -F
+    ip6tables -P INPUT DROP
+    ip6tables -P FORWARD DROP
+    ip6tables -P OUTPUT DROP
+    ip6tables -A INPUT -i lo -j ACCEPT
+    ip6tables -A OUTPUT -o lo -j ACCEPT
+    ip6tables -A OUTPUT -j REJECT --reject-with icmp6-adm-prohibited
 }
 
 verify_firewall() {
+    local failed=0
+
     log "Verifying firewall behavior..."
 
     if wget --timeout=4 -qO- https://example.com >/dev/null 2>&1; then
         warn "example.com should be blocked but is reachable"
+        failed=1
     else
         log "Blocked example.com - OK"
     fi
@@ -300,11 +304,24 @@ verify_firewall() {
         log "Reached api.github.com - OK"
         if wget --timeout=4 -qO- http://api.github.com >/dev/null 2>&1; then
             warn "api.github.com over port 80 should be blocked but is reachable"
+            failed=1
         else
             log "Blocked api.github.com over port 80 - OK"
         fi
     else
         warn "api.github.com should be reachable but is blocked"
+    fi
+
+    if ip6tables -S OUTPUT 2>/dev/null | grep -qx -- "-P OUTPUT DROP"; then
+        log "IPv6 OUTPUT policy is DROP - OK"
+    else
+        warn "IPv6 OUTPUT policy is not DROP"
+        failed=1
+    fi
+
+    if [[ "$failed" -ne 0 ]]; then
+        echo "[firewall] ERROR: firewall verification failed; refusing to start container" >&2
+        return 1
     fi
 }
 
