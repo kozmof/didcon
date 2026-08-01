@@ -1,4 +1,17 @@
-# Profile for Cargo and rustc invocations beneath /workspace.
+# Profile for Cargo, rustc, rustfmt, and clippy invocations beneath /workspace.
+#
+# CARGO_HOME is redirected to /workspace/.cargo-home rather than ~/.cargo for
+# the same reason the pnpm store is redirected (see pnpm-workspace/profile.toml):
+# Landlock domains nest by intersection, so when Claude Code, Codex, or herdr
+# spawns cargo, the cargo sandbox can only reach paths the *parent* policy
+# already granted.  ~/.cargo is granted by none of them; /workspace is granted
+# by all of them, and it is a host bind mount, so the registry cache also
+# survives image rebuilds without a named volume.
+#
+# .cargo-home, not .cargo: cargo discovers project-level config at
+# <ancestors>/.cargo/config.toml independently of $CARGO_HOME/config.toml.
+# Keeping the names distinct stops the cache directory from doubling as a
+# config-injection point ([build] rustflags, custom linker).
 workspace = false
 
 [[context]]
@@ -6,8 +19,18 @@ when_beneath = "/workspace"
 
 [[env]]
 name = "CARGO_HOME"
-literal = "/home/dev/.cargo"
+literal = "/workspace/.cargo-home"
 
+# Cargo's git dependency checkouts shell out to git; keep them off the user's
+# real ~/.gitconfig (credential helpers, url.insteadOf rewrites) by pointing at
+# an isolated global config inside the cargo home.  Git treats the file as
+# empty when it does not exist, so nothing needs to pre-create it.
+[[env]]
+name = "GIT_CONFIG_GLOBAL"
+literal = "/workspace/.cargo-home/gitconfig"
+
+# Not .../cargo-home/config: that path is cargo's own legacy config *file*, and
+# cargo aborts with "Is a directory" if a directory sits there.
 [[env]]
 name = "XDG_CONFIG_HOME"
-literal = "/home/dev/.config"
+literal = "/workspace/.cargo-home/xdg"

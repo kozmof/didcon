@@ -60,6 +60,24 @@ island is the exception: it is built from source at a pinned `ISLAND_REV`
 commit SHA, so there is no separate hash — pin a full 40-character SHA rather
 than a branch or tag.
 
+## Rust
+
+`RUST_VERSION` is the whole story: this image ships the dist tarball, not
+rustup, so **a project's `rust-toolchain.toml` is silently ignored**. Cargo uses
+the baked-in toolchain and says nothing about the mismatch. `cargo fmt` and
+`cargo clippy` come from the same tarball and are asserted at build time.
+
+To honour a project's pin, rebuild with both args from that release's
+`.sha512` file on `static.rust-lang.org`:
+
+```
+--build-arg RUST_VERSION=1.97.0 --build-arg RUST_SHA512=<hash>
+```
+
+`security-preflight.sh` compares `rust-toolchain.toml` against the installed
+`rustc` and warns on a mismatch, so the drift shows up at container start
+rather than as a confusing build error.
+
 ## Codex
 
 Codex prompts to self-update on startup and, if accepted, runs

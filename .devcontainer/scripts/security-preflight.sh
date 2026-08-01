@@ -302,16 +302,47 @@ check_island() {
     sandbox_allows pnpm-workspace ls /workspace
     sandbox_allows pnpm-workspace ls /tmp
 
-    # cargo-workspace: protects Cargo build scripts, proc macros, and tests.
+    # cargo-workspace: protects Cargo build scripts, proc macros, rustfmt,
+    # clippy, and tests.  Also checks that the agents can actually reach the
+    # toolchain, which is a separate failure mode (see the overlay note below).
     if [[ -x /opt/rust/bin/cargo ]]; then
         sandbox_blocks cargo-workspace ls /opt/scripts
         sandbox_blocks cargo-workspace ls /var/log
         sandbox_allows cargo-workspace ls /workspace
-        sandbox_allows cargo-workspace ls /home/dev/.cargo
-        if cargo --version >/dev/null 2>&1 && rustc --version >/dev/null 2>&1; then
-            pass "sandboxed Rust toolchain responds"
+        if cargo --version >/dev/null 2>&1 && rustc --version >/dev/null 2>&1 &&
+           cargo fmt --version >/dev/null 2>&1 && cargo clippy --version >/dev/null 2>&1; then
+            pass "sandboxed Rust toolchain, rustfmt, and clippy respond"
         else
-            fail "sandboxed Rust toolchain does not respond"
+            fail "sandboxed Rust toolchain, rustfmt, or clippy does not respond"
+        fi
+
+        # Landlock domains nest by intersection, so an agent that cannot execute
+        # /opt/rust cannot spawn cargo no matter what cargo-workspace allows.
+        # This is the failure the profiles-rust/ overlay exists to prevent.
+        for profile in claude-code codex; do
+            sandbox_allows "$profile" /opt/rust/bin/rustc --version
+        done
+        if [[ -x /opt/herdr/bin/herdr ]]; then
+            sandbox_allows herdr /opt/rust/bin/rustc --version
+        fi
+
+        # rust-toolchain.toml is honoured by rustup, which this image does not
+        # ship — cargo silently uses the baked-in toolchain instead.  A mismatch
+        # is a real footgun, so surface it rather than letting it pass unseen.
+        local toolchain_file=/workspace/rust-toolchain.toml
+        [[ -f /workspace/rust-toolchain ]] && toolchain_file=/workspace/rust-toolchain
+        if [[ -f "$toolchain_file" ]]; then
+            local wanted installed
+            wanted=$(grep -oE 'channel[[:space:]]*=[[:space:]]*"[^"]+"' "$toolchain_file" 2>/dev/null |
+                     head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+            installed=$(/opt/rust/bin/rustc --version 2>/dev/null | awk '{print $2}')
+            if [[ -z "$wanted" ]]; then
+                pass "$toolchain_file pins no explicit channel"
+            elif [[ "$wanted" == "$installed" ]]; then
+                pass "rust-toolchain channel matches the image: $installed"
+            else
+                warn "$toolchain_file asks for '$wanted' but the image ships $installed — no rustup here, so the request is ignored (rebuild with --build-arg RUST_VERSION=$wanted and its RUST_SHA512)"
+            fi
         fi
     fi
 

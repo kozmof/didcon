@@ -1,4 +1,5 @@
-# Landlock policy inherited by rustc, build scripts, proc macros, and tests.
+# Landlock policy inherited by rustc, rustfmt, clippy, build scripts, proc
+# macros, and tests.
 abi = 6
 
 [[ruleset]]
@@ -22,9 +23,10 @@ parent = ["/etc"]
 allowed_access = ["read_file"]
 parent = ["/proc"]
 
+# /workspace covers CARGO_HOME too — it is /workspace/.cargo-home (see profile.toml)
 [[path_beneath]]
 allowed_access = ["abi.all"]
-parent = ["/tmp", "/workspace", "/home/dev/.cargo", "/home/dev/.gitconfig"]
+parent = ["/tmp", "/workspace"]
 
 [[net_port]]
 allowed_access = ["connect_tcp"]

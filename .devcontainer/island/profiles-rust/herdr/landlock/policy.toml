@@ -1,0 +1,114 @@
+# Landlock policy for herdr (terminal agent-multiplexer) — Rust image overlay.
+#
+# Copied over island/profiles/herdr/landlock/policy.toml by Dockerfile.withRust
+# only.  It is that file plus one grant: /opt/rust (read + execute).  herdr
+# spawns the claude/codex shims, which spawn cargo; Landlock stacking is
+# intersection-only, so without this grant cargo cannot execute inside a herdr
+# pane even though the agent policies allow it.
+#
+# CARGO_HOME needs no extra rule here — it is /workspace/.cargo-home, covered by
+# the /workspace grant (see cargo-workspace/profile.toml).
+#
+# Keep in sync with the base policy when editing either.  The base file cannot
+# simply grant /opt/rust unconditionally — in the non-Rust images that path does
+# not exist and island warns on every launch.
+#
+# Allows access to:
+#   - System binaries/libs under /usr, /bin, /lib, /sbin   (read + execute)
+#   - /opt/herdr (its own root-owned binary)               (read + execute)
+#   - /opt/rust (the pinned Rust toolchain)                (read + execute)
+#   - Safe pseudo-devices incl. /dev/tty and /dev/pts      (read/write, PTY mux)
+#   - System config under /etc, and all of /proc           (read only)
+#   - ~/.bashrc and ~/.bash_aliases                        (read only, pane shells)
+#   - ~/.safe-chain                                        (read + execute, shell init)
+#   - ~/.aikido                                            (full access, scan state)
+#   - /tmp and /workspace                                  (full access)
+#   - /home/dev/.island (all tools) — herdr spawns the claude/codex shims,
+#     whose nested island sandboxes stack (Landlock stacking is
+#     intersection-only); without this grant the inner agents could not
+#     reach their own isolated state.
+#     Trade-off: herdr itself can read other agents' isolated state and
+#     credentials.  The inner sandboxes still constrain each agent.
+#   - /home/dev/.codex/tmp/arg0 — required by nested codex process renaming.
+#
+# TCP is intentionally NOT restricted here (same as the *-workspace
+# policies): safe-chain wraps npm/pnpm in pane shells through a local MITM
+# proxy on an ephemeral localhost port, which a 443-only rule would block.
+# The external iptables firewall enforces the domain allowlist, and the
+# nested agent sandboxes (claude-code, codex) keep their own 443-only rules.
+#
+# Denies by omission (Landlock default-deny):
+#   - ~/.ssh, ~/.claude (real), ~/.gnupg, ~/.npmrc
+#   - /opt/scripts (container firewall scripts)
+#   - /var/log (firewall audit logs)
+
+abi = 6
+
+[[ruleset]]
+handled_access_fs = ["abi.all"]
+scoped = ["abi.all"]
+
+# System binaries and libraries, plus the herdr and Rust toolchain binaries
+[[path_beneath]]
+allowed_access = ["abi.read_execute"]
+parent = ["/bin", "/lib", "/sbin", "/usr", "/opt/herdr", "/opt/rust"]
+
+# Safe pseudo-devices
+[[path_beneath]]
+allowed_access = ["read_file", "write_file"]
+parent = ["/dev/full", "/dev/null", "/dev/random", "/dev/urandom", "/dev/zero"]
+
+# Terminal devices (herdr multiplexes PTYs; /dev/pts covers /dev/pts/ptmx)
+[[path_beneath]]
+allowed_access = ["read_file", "write_file"]
+parent = ["/dev/tty", "/dev/pts"]
+
+# System configuration (read only).
+#
+# /proc must be granted wholesale, not as /proc/self: Landlock resolves
+# "/proc/self" to /proc/<pid> of the island process at ruleset creation, so
+# the grant never matches the forked descendants herdr exists to spawn
+# (server -> pane shell -> agent).  Claude Code's runtime reads
+# /proc/self/cgroup at startup and aborts (SIGABRT) when that open returns
+# EACCES.  Regular DAC still protects sensitive /proc entries.
+[[path_beneath]]
+allowed_access = ["read_dir", "read_file", "refer"]
+parent = ["/etc", "/proc"]
+
+# Shell startup files — herdr panes spawn interactive bash, which reads these
+[[path_beneath]]
+allowed_access = ["read_file"]
+parent = ["/home/dev/.bashrc", "/home/dev/.bash_aliases"]
+
+# Safe-chain shell integration — ~/.bashrc sources scripts/init-posix.sh and
+# puts bin/ on PATH
+[[path_beneath]]
+allowed_access = ["abi.read_execute"]
+parent = ["/home/dev/.safe-chain"]
+
+# Safe-chain may initialize or rotate its local CA certificate
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/home/dev/.safe-chain/certs"]
+
+# Safe-chain writes its malware-scan state here when wrapping npm/pnpm in
+# pane shells.  Pre-created in the Dockerfile so the rule can bind at
+# sandbox start (unsandboxed shells would otherwise create it lazily).
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/home/dev/.aikido"]
+
+# Ephemeral scratch space
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/tmp"]
+
+# Workspace
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/workspace"]
+
+# Isolated state for herdr and the agents it multiplexes (see header note)
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/home/dev/.island", "/home/dev/.codex/tmp/arg0"]

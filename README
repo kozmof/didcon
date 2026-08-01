@@ -36,3 +36,42 @@ Update an existing one (patch.sh)
     changes (custom whitelists, tweaked policies, ...) are preserved when you
     answer "no". Files that exist only in your project are reported at the end
     but never deleted.
+
+Language variants
+-----------------
+
+devcontainer.json selects one of three Dockerfiles: Dockerfile (Node only),
+Dockerfile.withGo, or Dockerfile.withRust.
+
+Rust notes
+    CARGO_HOME is /workspace/.cargo-home, not ~/.cargo -- the same redirect the
+    pnpm store uses. Landlock domains nest by intersection, so when an agent
+    spawns cargo the cargo sandbox can only reach paths the agent's own policy
+    already granted; ~/.cargo is granted by none of them, /workspace by all of
+    them. /workspace is a bind mount, so the crates.io index and downloaded
+    crates also survive image rebuilds with no volume to manage. Add
+    .cargo-home/ to your project's .gitignore.
+
+    The name is .cargo-home rather than .cargo on purpose: cargo discovers
+    project config at <ancestors>/.cargo/config.toml separately from
+    $CARGO_HOME/config.toml, and collapsing the two would let anything with
+    write access to the cache inject build flags.
+
+    island/profiles-rust/ overlays the claude-code, codex, and herdr policies
+    with variants that grant /opt/rust and CARGO_HOME; Dockerfile.withRust
+    applies it on top of island/profiles/. The base policies cannot grant
+    /opt/rust unconditionally because island warns about missing paths on every
+    launch in the non-Rust images. When editing an agent policy, change both
+    copies.
+
+    rust-toolchain.toml is ignored -- the image installs the Rust dist tarball,
+    not rustup. See .devcontainer/docs/version-bumps.md.
+
+Checking a running container
+----------------------------
+
+    /opt/scripts/security-preflight.sh
+
+    Verifies safe-chain, the registry policy, island profiles, the shims, and
+    that each sandbox blocks and allows what it should. Run it as the dev user
+    after postCreateCommand finishes.

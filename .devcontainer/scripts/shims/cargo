@@ -1,3 +1,4 @@
 #!/bin/sh
-# Sandbox Cargo and all child build scripts, proc macros, and tests.
+# Sandbox Cargo and all child build scripts, proc macros, rustfmt, clippy, and tests.
+# The profile supplies isolated Cargo, XDG, and Git configuration paths.
 XDG_CONFIG_HOME=/etc exec island run -p cargo-workspace -- /opt/rust/bin/cargo "$@"

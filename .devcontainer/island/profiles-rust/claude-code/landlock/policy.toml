@@ -1,10 +1,23 @@
-# Landlock policy for the Claude Code CLI.
+# Landlock policy for the Claude Code CLI — Rust image overlay.
+#
+# Copied over island/profiles/claude-code/landlock/policy.toml by
+# Dockerfile.withRust only.  It is that file plus one grant: /opt/rust
+# (read + execute).  Landlock domains nest by intersection, so cargo spawned
+# from Claude can only execute the toolchain if this policy allows it too.
+#
+# CARGO_HOME needs no rule here — it is /workspace/.cargo-home, covered by the
+# /workspace grant below (see cargo-workspace/profile.toml).
+#
+# Keep in sync with the base policy when editing either.  The base file cannot
+# simply grant /opt/rust unconditionally — in the non-Rust images that path does
+# not exist and island warns on every agent launch.
 #
 # Allows access to:
 #   - System binaries/libs under /usr, /bin, /lib, /sbin  (read + execute)
+#   - The Rust toolchain under /opt/rust                  (read + execute)
 #   - Safe pseudo-devices incl. /dev/tty and /dev/pts     (read/write)
 #   - System config under /etc and /proc/self              (read only)
-#   - /tmp and /workspace                                  (full access)
+#   - /tmp and /workspace (incl. CARGO_HOME)               (full access)
 #   - Outbound HTTPS (port 443) for the Anthropic API
 #
 # Denies by omission (Landlock default-deny):
@@ -28,10 +41,11 @@ scoped = ["abi.all"]
 allowed_access = ["abi.read_execute"]
 parent = ["/bin", "/lib", "/sbin", "/usr"]
 
-# Rust toolchain — needed so Claude can spawn the cargo-workspace sandbox
-# [[path_beneath]]
-# allowed_access = ["abi.read_execute"]
-# parent = ["/opt/rust"]
+# Rust toolchain — needed so Claude can spawn the cargo-workspace sandbox.
+# Cargo's child profile further restricts build scripts, proc macros, and tests.
+[[path_beneath]]
+allowed_access = ["abi.read_execute"]
+parent = ["/opt/rust"]
 
 # Safe pseudo-devices (needed by node for crypto and I/O)
 [[path_beneath]]
