@@ -16,8 +16,8 @@
 > writable Git/devcontainer control files, arbitrary recursive DNS, and
 > connectable VS Code/X11/Remote Containers sockets. The configuration now
 > bind-mounts `.devcontainer`, `.git/config`, and `.git/hooks` read-only,
-> keeps agent installations root-owned, builds Island with `--locked`, fails startup on firewall
-> deny-test or IPv6-policy failure, and makes preflight nesting-aware.
+> keeps agent installations root-owned, pins the Island build to a commit SHA, fails startup on
+> firewall deny-test or IPv6-policy failure, and makes preflight nesting-aware.
 >
 > These changes do not make a writable host checkout safe for fully malicious
 > code. Project scripts and source files can still be changed and later run on
@@ -25,6 +25,27 @@
 > reachable because the development environment exposes sockets beneath
 > `/tmp`. Strong isolation requires a container-volume checkout with reviewed
 > patch export, plus removal or mediation of host IPC and DNS.
+
+> **2026-08-02 build and startup fixes:** Three defects surfaced on a WSL2 host,
+> two of them in the startup checks the section above relies on.
+>
+> The Island build dropped `--locked`. Upstream publishes no `Cargo.lock`, so the
+> flag pinned nothing; it only made the base image's `cargo-auditable` wrapper
+> abort when its `cargo metadata` call tried to create the missing lock file.
+> `ISLAND_REV` remains the pin.
+>
+> The firewall now probes for a working `ip6tables` backend (default, then
+> `-nft`, then `-legacy`) instead of assuming the default. That default is the
+> legacy backend, which needs the `ip6table_filter` kernel module; hosts without
+> it — WSL2 among them — could not install the IPv6 block-all rules at all, and
+> the container failed to start. The rules are unchanged and still fail closed:
+> if no backend works, setup aborts rather than leaving IPv6 unfiltered.
+>
+> The startup deny-test now passes `--no-hsts` to every `wget` probe. Without it,
+> the HTTPS reachability check recorded GitHub's HSTS policy, and the port-80
+> check that follows was silently upgraded to HTTPS — so it passed while never
+> testing port 80. Port 80 was in fact blocked, but the check could not have
+> detected it otherwise.
 
 
 ---

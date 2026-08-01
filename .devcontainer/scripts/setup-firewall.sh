@@ -42,6 +42,13 @@ WARNINGS=0
 BUILD_DYNAMIC_SUCCESSES=0
 BUILD_TOTAL_ENTRIES=0
 
+# Chosen by select_ip6tables() at setup time. The default ip6tables binary is
+# the legacy backend, which needs the ip6table_filter kernel module; some hosts
+# (notably WSL2) omit it while still handling IPv6 through nf_tables. Probing
+# for a backend that works keeps the IPv6 block-all rules enforceable instead
+# of aborting the container over a missing module.
+IP6TABLES=""
+
 log() {
     echo "[firewall] $*"
 }
@@ -258,6 +265,22 @@ add_dns_rules() {
     fi
 }
 
+select_ip6tables() {
+    local candidate
+    local -a candidates=(ip6tables ip6tables-nft ip6tables-legacy)
+
+    for candidate in "${candidates[@]}"; do
+        command -v "$candidate" >/dev/null 2>&1 || continue
+        if "$candidate" -S >/dev/null 2>&1; then
+            IP6TABLES="$candidate"
+            log "Using $candidate for IPv6 rules"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 configure_firewall_rules() {
 
     log "Restricting egress to HTTPS destinations in the allowlist"
@@ -279,13 +302,18 @@ configure_firewall_rules() {
     # IPv6 is not used in this devcontainer. These commands are deliberately
     # fail-closed: silently ignoring an ip6tables failure could leave an IPv6
     # route outside the IPv4-only destination allowlist.
-    ip6tables -F
-    ip6tables -P INPUT DROP
-    ip6tables -P FORWARD DROP
-    ip6tables -P OUTPUT DROP
-    ip6tables -A INPUT -i lo -j ACCEPT
-    ip6tables -A OUTPUT -o lo -j ACCEPT
-    ip6tables -A OUTPUT -j REJECT --reject-with icmp6-adm-prohibited
+    if ! select_ip6tables; then
+        echo "[firewall] ERROR: no working ip6tables backend; refusing to leave IPv6 unfiltered" >&2
+        return 1
+    fi
+
+    "$IP6TABLES" -F
+    "$IP6TABLES" -P INPUT DROP
+    "$IP6TABLES" -P FORWARD DROP
+    "$IP6TABLES" -P OUTPUT DROP
+    "$IP6TABLES" -A INPUT -i lo -j ACCEPT
+    "$IP6TABLES" -A OUTPUT -o lo -j ACCEPT
+    "$IP6TABLES" -A OUTPUT -j REJECT --reject-with icmp6-adm-prohibited
 }
 
 verify_firewall() {
@@ -293,16 +321,19 @@ verify_firewall() {
 
     log "Verifying firewall behavior..."
 
-    if wget --timeout=4 -qO- https://example.com >/dev/null 2>&1; then
+    # --no-hsts on every probe: without it wget records api.github.com's HSTS
+    # header during the HTTPS check and silently upgrades the port 80 check to
+    # HTTPS, which then passes and hides whether port 80 is actually blocked.
+    if wget --no-hsts --timeout=4 -qO- https://example.com >/dev/null 2>&1; then
         warn "example.com should be blocked but is reachable"
         failed=1
     else
         log "Blocked example.com - OK"
     fi
 
-    if wget --timeout=5 -qO- https://api.github.com/zen >/dev/null 2>&1; then
+    if wget --no-hsts --timeout=5 -qO- https://api.github.com/zen >/dev/null 2>&1; then
         log "Reached api.github.com - OK"
-        if wget --timeout=4 -qO- http://api.github.com >/dev/null 2>&1; then
+        if wget --no-hsts --timeout=4 -qO- http://api.github.com >/dev/null 2>&1; then
             warn "api.github.com over port 80 should be blocked but is reachable"
             failed=1
         else
@@ -312,7 +343,7 @@ verify_firewall() {
         warn "api.github.com should be reachable but is blocked"
     fi
 
-    if ip6tables -S OUTPUT 2>/dev/null | grep -qx -- "-P OUTPUT DROP"; then
+    if [[ -n "$IP6TABLES" ]] && "$IP6TABLES" -S OUTPUT 2>/dev/null | grep -qx -- "-P OUTPUT DROP"; then
         log "IPv6 OUTPUT policy is DROP - OK"
     else
         warn "IPv6 OUTPUT policy is not DROP"

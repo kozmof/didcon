@@ -59,7 +59,9 @@ updated together with the version or the build fails by design.
 
 island is the exception: it is built from source at a pinned `ISLAND_REV`
 commit SHA, so there is no separate hash — pin a full 40-character SHA rather
-than a branch or tag.
+than a branch or tag. The SHA pins island's own source but not its crate
+dependencies: upstream publishes no `Cargo.lock`, so cargo resolves them at
+build time and two builds of the same SHA can pick up different patch releases.
 
 ## Rust
 
