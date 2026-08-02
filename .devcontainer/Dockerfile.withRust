@@ -18,7 +18,7 @@ FROM cgr.dev/chainguard/node:latest-dev
 ARG CLAUDE_CODE_VERSION=latest
 ARG CODEX_VERSION=latest
 ARG NPM_VERSION=11.17.0
-ARG PNPM_VERSION=10.12.1
+ARG PNPM_VERSION=10.17.1
 
 # Switch to root for package installation
 USER root
