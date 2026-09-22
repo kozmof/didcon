@@ -1,0 +1,81 @@
+# Landlock policy for blender and its child processes.
+#
+# `blender -b --python script.py` exists to execute addon code, and addons
+# routinely arrive as third-party zips installed from the extensions platform or
+# straight off a forum.  Everything the addon does — and every process it spawns
+# — inherits these restrictions, which is the primary protection between an
+# installed addon and ~/.ssh.
+#
+# Unlike the Python packaging path, which has Takumi Guard and safe-chain in
+# front of it, nothing screens a Blender addon zip before it runs.  This sandbox
+# is the whole of that defence.
+#
+# Allows access to:
+#   - System binaries/libs                    (read + execute)
+#   - Safe pseudo-devices                     (read/write)
+#   - /etc                                    (read + list)
+#   - /proc                                   (read files only, no dir listing)
+#   - /tmp                                    (full — render and temp files)
+#   - /workspace                              (full — project source and the
+#                                              user resources dir)
+#   - /usr/local/blender                      (read + execute, via /usr — the
+#                                              binary, its 4.5/ scripts tree, and
+#                                              its bundled CPython)
+#
+# Denies by omission:
+#   - ~/.ssh, ~/.claude, ~/.gnupg, ~/.npmrc
+#   - /opt/scripts, /var/log
+#   - ~/.config (user resources are redirected to /workspace/.blender-user via
+#     BLENDER_USER_RESOURCES)
+#   - /dev/dri — deliberate.  This image is CPU-only headless by design: `-b`
+#     with Cycles-CPU covers addon logic, operators, and regression tests.
+#     Granting GPU access would mean a device mount in devcontainer.json and a
+#     read/write rule here, widening what addon code under test can reach.
+
+abi = 6
+
+[[ruleset]]
+handled_access_fs = ["abi.all"]
+handled_access_net = ["abi.all"]
+scoped = ["abi.all"]
+
+# System binaries and libraries (includes /usr/local/blender via /usr)
+[[path_beneath]]
+allowed_access = ["abi.read_execute"]
+parent = ["/bin", "/lib", "/sbin", "/usr"]
+
+# Safe pseudo-devices
+[[path_beneath]]
+allowed_access = ["read_file", "write_file"]
+parent = ["/dev/full", "/dev/null", "/dev/random", "/dev/urandom", "/dev/zero"]
+
+# System configuration (read only)
+[[path_beneath]]
+allowed_access = ["read_dir", "read_file", "refer"]
+parent = ["/etc"]
+
+# /proc: read_file only (not read_dir) so Blender can read /proc/self/stat etc.
+# for CPU and memory info, but addon code cannot list /proc/ to enumerate
+# running PIDs.
+# Note: /proc/self cannot be used here — Landlock resolves symlinks to the
+# island PID's inode at setup time, which doesn't cover child process inodes.
+[[path_beneath]]
+allowed_access = ["read_file"]
+parent = ["/proc"]
+
+# Ephemeral scratch space used for render output and temp files
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/tmp"]
+
+# Workspace — project source and the user resources dir
+# (BLENDER_USER_RESOURCES=/workspace/.blender-user, see profile.toml)
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/workspace"]
+
+# Outbound HTTPS.  The iptables firewall enforces the domain allowlist; Landlock
+# only needs to permit the port so connect() is not blocked before iptables.
+[[net_port]]
+allowed_access = ["connect_tcp"]
+port = [443]

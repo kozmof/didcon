@@ -15,10 +15,16 @@ switched off (see [Codex](#codex) below).
 
 ## Where each version lives
 
-All knobs are `ARG`s near the top of each Dockerfile. The four variants
-(`Dockerfile`, `Dockerfile.withGo`, `Dockerfile.withRust`, `Dockerfile.withZig`)
-share the same core set and must be kept in sync — bump the same value in every
-variant you build.
+All knobs are `ARG`s near the top of each Dockerfile. The five variants
+(`Dockerfile`, `Dockerfile.withGo`, `Dockerfile.withRust`, `Dockerfile.withZig`,
+and `specific-tool-dockerfile/blender/Dockerfile.withBlender`) share the same core set
+and must be kept in sync — bump the same value in every variant you build.
+
+One pin lives outside the Dockerfiles entirely: safe-chain is installed at
+`postCreateCommand` time by
+[`scripts/install-safe-chain.sh`](../scripts/install-safe-chain.sh), which pins
+its own `VERSION` and `SHA256`. That file is shared by every variant, so a bump
+there changes all of them at once.
 
 | Tool | ARG(s) | Default | Notes |
 |---|---|---|---|
@@ -30,6 +36,10 @@ variant you build.
 | Go (`.withGo`) | `GO_VERSION` + `GO_SHA256` | `1.24.2` | Verified download |
 | Rust (`.withRust`) | `RUST_VERSION` + `RUST_SHA512` | `1.96.0` | Verified download |
 | Zig (`.withZig`) | `ZIG_VERSION` + `ZIG_SHA256` | `0.16.0` | Verified download |
+| Blender (`.withBlender`) | `BLENDER_SERIES` + `BLENDER_VERSION` + `BLENDER_SHA256` | `4.5` / `4.5.14` | LTS; verified download |
+| uv (`.withBlender`) | `UV_VERSION` + `UV_SHA256` | `0.12.17` | Verified download |
+| Blender stubs (`.withBlender`) | `specific-tool-dockerfile/blender/blender-stubs.txt` | `fake-bpy-module-4.5==20260730` | A file, not an `ARG`; pinned by sha256 |
+| safe-chain (all variants) | `VERSION` + `SHA256` in `scripts/install-safe-chain.sh` | `1.5.20` | Not a Dockerfile `ARG` |
 
 `CLAUDE_CODE_VERSION`, `CODEX_VERSION`, `NPM_VERSION`, `ISLAND_REV`, and
 `INSTALL_HERDR` are also surfaced as build args in
@@ -136,6 +146,71 @@ plainly — rebuild with a matching `ZIG_VERSION` and `ZIG_SHA256`.
 Pin a tagged release rather than a `master` build. Nightly tarballs live under
 `ziglang.org/builds/` and are deleted as newer ones appear, so a `master` pin
 turns into a 404 within days and breaks the image rebuild.
+
+## Blender and uv
+
+Both follow the verified-download rule above, with two wrinkles.
+
+Blender's hash lives in a per-release manifest covering every platform, so pick
+the `linux-x64.tar.xz` line:
+
+```
+curl -s https://download.blender.org/release/Blender4.5/blender-4.5.14.sha256 \
+  | grep linux-x64
+```
+
+`BLENDER_SERIES` is the directory name (`4.5`) and `BLENDER_VERSION` the full
+release (`4.5.14`); a patch bump moves only the latter. Moving to a different
+series means changing both, and also bumping the stub pin below, which is
+series-matched.
+
+`uv` publishes a `.sha256` next to each release asset:
+
+```
+curl -sL https://github.com/astral-sh/uv/releases/download/0.12.17/uv-x86_64-unknown-linux-gnu.tar.gz.sha256
+```
+
+uv is root-owned, so `uv self update` fails with a permission error rather than
+succeeding — the same centrally-managed rule that applies to Codex and herdr.
+Bump it here and rebuild.
+
+## Blender API stubs
+
+`specific-tool-dockerfile/blender/blender-stubs.txt` is the one pin that is a file
+rather than an `ARG`. It is installed to `/etc/uv/blender-stubs.txt` root-owned
+and read-only, and projects install from it with:
+
+```
+uv pip install --require-hashes -r /etc/uv/blender-stubs.txt
+```
+
+To bump it, take the new version's digests from PyPI:
+
+```
+curl -s https://pypi.org/pypi/fake-bpy-module-4.5/json \
+  | jq -r '.urls[] | "\(.packagetype) \(.digests.sha256)"'
+```
+
+Keep both hashes (wheel and sdist) on the requirement line. `fake-bpy-module-4.5`
+declares no dependencies, so the single pinned line is the complete closure and
+no `uv pip compile` step is needed.
+
+Bump this in lockstep with `BLENDER_SERIES`: the stub package name encodes the
+Blender series, so a move to 5.x means `fake-bpy-module-5.x` and a fresh pair of
+hashes.
+
+## safe-chain
+
+safe-chain is not a Dockerfile `ARG` — it is installed at container-create time
+by `scripts/install-safe-chain.sh`, which pins the installer's `VERSION` and
+verifies its `SHA256` before running it. Bump both together; the vendor publishes
+the current pair in the install snippet in their README.
+
+This file is shared by all five variants, so treat a bump as a change to every
+image, and re-run `security-preflight.sh` in each one you build. safe-chain
+covers npm *and* the Python toolchain (`pip`, `uv`, `uvx`, `poetry`, `pipx`,
+`pdm`), which is why the Blender image depends on it as one of its supply-chain
+layers.
 
 ## Codex
 

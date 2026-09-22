@@ -1,0 +1,24 @@
+# Blender API stubs, series-matched to BLENDER_SERIES in Dockerfile.withBlender.
+# Deployed to /etc/uv/blender-stubs.txt, root-owned and read-only.
+#
+# Install into a project venv with:
+#
+#   uv pip install --require-hashes -r /etc/uv/blender-stubs.txt
+#
+# These are type stubs only. The real bpy always comes from the pinned Blender
+# binary, which is the interpreter the addon actually runs under.
+#
+# fake-bpy-module-4.5 declares no dependencies, so this single pinned line is the
+# complete closure — no `uv pip compile` step is needed to expand it.
+#
+# Both artifact hashes are listed (wheel first, then sdist) so the pin holds
+# whichever uv resolves to. They are PyPI's published digests, and they hold
+# through the Takumi Guard proxy: the guard serves byte-identical artifacts.
+# The hashes have to live here rather than come from the index, because the
+# guard's simple index does not carry the "#sha256=" fragment PyPI publishes.
+#
+# To bump: https://pypi.org/pypi/fake-bpy-module-4.5/json -> urls[].digests.sha256
+
+fake-bpy-module-4.5==20260730 \
+    --hash=sha256:c6a0b6e4e0e9e5d918fbcfb6754063af89979ad64fbbb20f4a16e8a6c0ca7ae2 \
+    --hash=sha256:f4e9aac5627f735f0aa28f99d6ae4c1f6c4833e6ca1ba537c552eea17b0563ef

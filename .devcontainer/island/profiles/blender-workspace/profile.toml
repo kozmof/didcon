@@ -1,0 +1,35 @@
+# Profile for blender invocations inside /workspace.
+# Applied via the /usr/local/bin/blender shim.
+#
+# workspace = false preserves the real XDG dirs.
+#
+# BLENDER_USER_RESOURCES is redirected to /workspace/.blender-user rather than
+# the default ~/.config/blender, for the same reason CARGO_HOME, GOCACHE, and
+# ZIG_GLOBAL_CACHE_DIR are redirected: Landlock domains nest by intersection, so
+# when Claude Code, Codex, or herdr spawns blender, the blender sandbox can only
+# reach paths the *parent* policy already granted.  ~/.config is granted by none
+# of them; /workspace is granted by all of them, and it is a host bind mount, so
+# installed addons and preferences also survive image rebuilds without a named
+# volume.
+#
+# One variable covers config/, scripts/, extensions/, and datafiles/. The useful
+# side effect for addon work is that the addon under development installs into
+# /workspace/.blender-user/extensions/ — inside the bind mount, so it is visible
+# from the host and survives a rebuild.
+
+workspace = false
+
+[[context]]
+when_beneath = "/workspace"
+
+[[env]]
+name = "BLENDER_USER_RESOURCES"
+literal = "/workspace/.blender-user"
+
+# The shim sets XDG_CONFIG_HOME=/etc so island itself can find its profiles.
+# Point child processes somewhere isolated instead of leaving them with /etc as
+# their config home.  This only stops addon code and the tools it spawns from
+# treating /etc as user configuration.
+[[env]]
+name = "XDG_CONFIG_HOME"
+literal = "/workspace/.blender-user/xdg"

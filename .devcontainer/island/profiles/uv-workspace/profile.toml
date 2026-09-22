@@ -1,0 +1,95 @@
+# Profile for uv and uvx invocations inside /workspace.
+# Applied via the /usr/local/bin/uv and /usr/local/bin/uvx shims.
+#
+# workspace = false preserves the real XDG dirs.
+#
+# The cache, managed-Python, and tool directories are redirected under
+# /workspace rather than ~/.cache and ~/.local, for the same reason CARGO_HOME,
+# GOCACHE, and ZIG_GLOBAL_CACHE_DIR are redirected: Landlock domains nest by
+# intersection, so when Claude Code, Codex, or herdr spawns uv, the uv sandbox
+# can only reach paths the *parent* policy already granted.  ~/.cache is granted
+# by none of them; /workspace is granted by all of them, and it is a host bind
+# mount, so the wheel cache survives image rebuilds without a named volume.
+
+workspace = false
+
+[[context]]
+when_beneath = "/workspace"
+
+[[env]]
+name = "UV_CACHE_DIR"
+literal = "/workspace/.uv-cache"
+
+[[env]]
+name = "UV_PYTHON_INSTALL_DIR"
+literal = "/workspace/.uv-python"
+
+[[env]]
+name = "UV_TOOL_DIR"
+literal = "/workspace/.uv-tools"
+
+[[env]]
+name = "UV_TOOL_BIN_DIR"
+literal = "/workspace/.uv-tools/bin"
+
+# The shim sets XDG_CONFIG_HOME=/etc so island itself can find its profiles.
+# Point child processes somewhere isolated instead of leaving them with /etc as
+# their config home.  This matters more here than elsewhere: building an sdist
+# runs setup.py, and that code should not treat /etc as user configuration.
+[[env]]
+name = "XDG_CONFIG_HOME"
+literal = "/workspace/.uv-cache/xdg"
+
+# Takumi Guard, restated from /etc/uv/uv.toml.  The duplication is deliberate:
+# /etc/uv/uv.toml is uv's system-level config, which is its *lowest* precedence
+# tier, so a project's own uv.toml in /workspace could otherwise point installs
+# away from the guard — and /workspace is writable by exactly the agents this
+# sandbox exists to contain.  Environment variables outrank all persistent
+# configuration, which makes the guard non-negotiable on the sandboxed path.
+# A project that genuinely needs a private index uses the documented full-path
+# bypass (/usr/local/uv/uv), which still gets /etc/uv/uv.toml as its default.
+#
+# Note the variable name: uv deliberately does not read PIP_INDEX_URL.
+[[env]]
+name = "UV_DEFAULT_INDEX"
+literal = "https://pypi.flatt.tech/simple/"
+
+# Hash-checking mode.  Verified against uv 0.12.17's crates/uv-cli/src/lib.rs:
+# HashCheckingArgs (which carries env = EnvVars::UV_REQUIRE_HASHES) is wired
+# into exactly three commands — `uv pip install`, `uv pip sync`, and `uv build`.
+# It does not touch `uv add`, `uv lock`, `uv sync`, or `uv run`.
+#
+# That split is what makes this a safe default rather than a nuisance.  The
+# project interface is already hash-checked: uv.lock records a sha256 per
+# distribution and uv verifies available hashes by default, so `uv add` and
+# `uv sync` keep working untouched.  The loose path — `uv pip install <name>`,
+# resolved fresh against whatever the index serves at that moment — is the one
+# this closes, forcing every requirement to be pinned `==` with an explicit hash.
+#
+# Hash-checking mode rejects editable and Git installs, so `uv pip install -e .`
+# needs an escape hatch, and there is exactly one — the standard full-path
+# bypass:
+#
+#   /usr/local/uv/uv pip install -e .
+#
+# The two things that look like they should work do not, both verified against
+# uv 0.12.17 in this image:
+#   - `--no-require-hashes` fails with "the argument '--no-require-hashes'
+#     cannot be used with '--require-hashes'".  clap counts the env-provided
+#     value as an occurrence of --require-hashes, so the pair conflicts instead
+#     of the later one overriding.
+#   - `UV_REQUIRE_HASHES=0 uv ...` has no effect: island sets this as a literal,
+#     which replaces whatever the caller exported.
+#
+# That is the intended shape — same as every other shim here, the full path is
+# the deliberate, visible bypass — but it is worth stating, because the obvious
+# flag failing with a confusing error is otherwise a dead end.
+#
+# What this buys, precisely: hashes give integrity and reproducibility, not
+# vetting — a hash-pinned malicious package is still malicious.  Vetting is
+# Takumi Guard's and safe-chain's job, and for PyPI both exist.  This is the
+# third, independent layer, and it removes silent substitution and resolution
+# drift.  /etc/uv/blender-stubs.txt is the worked example of the format.
+[[env]]
+name = "UV_REQUIRE_HASHES"
+literal = "1"

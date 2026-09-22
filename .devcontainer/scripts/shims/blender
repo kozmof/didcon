@@ -1,0 +1,10 @@
+#!/bin/sh
+# Wrapper that runs blender inside the island blender-workspace Landlock sandbox.
+# `blender -b --python script.py` executes addon code, and addons arrive as
+# third-party zips — this sandbox is what stops one reading ~/.ssh, ~/.claude,
+# etc.  Every process the addon spawns inherits the restrictions.
+# The real blender binary is at /usr/local/blender/blender.
+#
+# To bypass the sandbox, use the full path:
+#   /usr/local/blender/blender -b
+XDG_CONFIG_HOME=/etc exec island run -p blender-workspace -- /usr/local/blender/blender "$@"

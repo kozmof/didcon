@@ -44,9 +44,36 @@ policies. Files that exist only in your project are reported at the end but
 never deleted.
 
 ## Language variants
-devcontainer.json selects one of four Dockerfiles. Dockerfile builds a
+devcontainer.json selects one of five Dockerfiles. Dockerfile builds a
 Node-only image, Dockerfile.withGo adds Go, Dockerfile.withRust adds Rust,
-and Dockerfile.withZig adds Zig.
+and Dockerfile.withZig adds Zig. The fifth,
+specific-tool-dockerfile/blender/Dockerfile.withBlender, is for Blender addon
+development and adds headless Blender plus uv.
+
+The Blender variant lives in its own subdirectory rather than beside the
+others, so devcontainer.json needs the context spelled out:
+
+```json
+"build": {
+  "dockerfile": "specific-tool-dockerfile/blender/Dockerfile.withBlender",
+  "context": ".",
+  "options": ["--pull"]
+}
+```
+
+"context" is not optional here. Without it the build context defaults to the
+Dockerfile's own directory and the build fails on the first COPY:
+
+```
+ERROR: failed to compute cache key: "/extra-whitelist.conf": not found
+```
+
+"context": "." means .devcontainer, which is what every COPY in the Dockerfiles
+is relative to. Building by hand:
+
+```sh
+docker build --pull -f .devcontainer/specific-tool-dockerfile/blender/Dockerfile.withBlender .devcontainer
+```
 
 ### Rust notes
 CARGO_HOME is /workspace/.cargo-home rather than ~/.cargo, the same
@@ -104,6 +131,106 @@ added there.
 The image ships one pinned compiler and no version manager, so a project
 requiring a different Zig version means a rebuild. See
 .devcontainer/docs/version-bumps.md.
+
+### Blender notes
+Everything specific to this variant — the Dockerfile, the uv and pip registry
+policies, and the stub pin — lives together under
+.devcontainer/specific-tool-dockerfile/blender/.
+
+The image ships one pinned Blender LTS release at /usr/local/blender and uv at
+/usr/local/uv, both root-owned. As with Go and Zig, and unlike Rust, neither
+needs an island/profiles-blender/ overlay: every agent policy already grants
+read and execute on /usr, which covers both. security-preflight.sh asserts that
+the agents really can execute them, so a future change to those grants surfaces
+at container start rather than the first time an agent tries to run a test.
+
+Blender's user resources are redirected to /workspace/.blender-user via
+BLENDER_USER_RESOURCES, and uv's cache, managed Pythons, and tools to
+/workspace/.uv-cache, .uv-python, and .uv-tools. This is the same redirect
+CARGO_HOME, GOCACHE, and ZIG_GLOBAL_CACHE_DIR get, for the same reason:
+Landlock domains nest by intersection, so when an agent spawns blender or uv the
+child sandbox can only reach paths the agent's own policy already granted. No
+agent policy grants ~/.config or ~/.cache, and every one of them grants
+/workspace, which is a bind mount — so an addon installed into
+.blender-user/extensions/ is visible from the host and survives a rebuild. Add
+.blender-user/, .uv-cache/, .uv-python/, .uv-tools/, and .venv/ to your
+project's .gitignore.
+
+The image is CPU-only headless by design. blender -b with Cycles-CPU covers
+addon logic, operators, and regression tests, and nothing in the image needs a
+GPU, so there is no /dev/dri device and no GPU grant in the blender-workspace
+policy. Enabling GPU rendering means adding both, which widens what addon code
+under test can reach — do it deliberately, not by default.
+
+A typical loop: tests run as
+
+```sh
+blender -b --factory-startup --python tests/run.py
+```
+
+through the shim, so the addon executes sandboxed.
+
+uv manages the dev-side tooling. Ask it for 3.11 explicitly so the venv matches
+the interpreter Blender bundles — otherwise uv picks the newest Python it can
+find, which is not the one your addon will run under:
+
+```sh
+uv venv --python 3.11
+uv pip install --require-hashes -r /etc/uv/blender-stubs.txt
+```
+
+uv downloads a managed CPython 3.11 into /workspace/.uv-python on first use.
+The stubs are PEP 561 packages (bpy-stubs and friends) for editors and type
+checkers; they are deliberately not importable at runtime. The real bpy only
+ever comes from the pinned Blender binary.
+
+### Blender variant supply chain
+This is the inverse of the Zig section above. Where Zig documents a gap, the
+Python side of this image has four layers, and it is worth knowing which does
+what.
+
+**Takumi Guard** (https://pypi.flatt.tech/simple/) is a proxy in front of PyPI
+that blocks known-malicious packages before any code executes and quarantines
+newly published ones for three days — the same role npm.flatt.tech plays for npm
+and golang.flatt.tech for Go. It is set in /etc/uv/uv.toml and /etc/pip.conf,
+both root-owned and credential-free, and re-forced as UV_DEFAULT_INDEX in the
+uv-workspace profile. The duplication is deliberate: /etc/uv/uv.toml is uv's
+lowest-precedence config tier, so a project's own uv.toml could otherwise point
+installs elsewhere, and environment variables outrank every config file.
+
+The guard vets at the resolution layer rather than proxying every byte: it
+serves the simple index itself, but its /files/ URLs are 302 redirects to PyPI's
+CDN, so files.pythonhosted.org is whitelisted too. pypi.org — the unvetted index
+— is not, which is what keeps resolution going through the guard. A project that
+points uv at pypi.org directly fails closed rather than quietly installing
+something nothing screened.
+
+**safe-chain** wraps uv, uvx, and pip with a second, independent threat feed
+(Aikido Intel) plus a 48-hour minimum package age. It is installed at
+postCreateCommand time and pinned in scripts/install-safe-chain.sh.
+
+**Hash pinning** is forced by UV_REQUIRE_HASHES=1 in the uv-workspace profile.
+It applies to uv pip install, uv pip sync, and uv build — not to uv add, uv
+lock, uv sync, or uv run, which are already hash-checked through uv.lock. So the
+path it closes is the loose one: uv pip install <name>, resolved fresh against
+whatever the index serves at that moment. Hash-checking mode rejects editable
+and Git installs, so `uv pip install -e .` needs the full-path bypass
+/usr/local/uv/uv — and that is the only escape hatch. `--no-require-hashes`
+fails with a conflict error, because uv counts the env-provided value as an
+occurrence of the flag it is meant to override, and `UV_REQUIRE_HASHES=0` in the
+caller's environment is replaced by the profile's literal.
+/etc/uv/blender-stubs.txt is both the stub pin and a worked example of the
+format a project's own requirements file should take. Note what this layer does
+and does not buy: hashes give integrity and reproducibility, not vetting. A
+hash-pinned malicious package is still malicious — vetting is the first two
+layers' job.
+
+**The uv-workspace Landlock policy** is the backstop for whatever the first
+three miss, since building an sdist still runs setup.py.
+
+Blender addons get none of this. Nothing screens a third-party addon zip before
+blender -b --python runs it, so for addon code the blender-workspace sandbox is
+the whole of the defence — the same weight zig-workspace carries in that image.
 
 ## Checking a running container
 ```

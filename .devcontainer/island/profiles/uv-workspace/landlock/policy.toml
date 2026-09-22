@@ -1,0 +1,86 @@
+# Landlock policy for uv and its child processes.
+#
+# Installing a Python package is not a passive download: uv builds sdists, and
+# building an sdist runs setup.py — arbitrary code from PyPI, executed at
+# install time.  Those child processes inherit these restrictions, which is the
+# primary protection against malicious code executing during `uv pip install`,
+# `uv sync`, or `uv build`.
+#
+# Three other layers sit in front of this one, which is why this policy is a
+# backstop rather than the whole defence:
+#   1. Takumi Guard (pypi.flatt.tech) blocks known-malicious packages and
+#      quarantines newly published ones for 3 days.  It is the only whitelisted
+#      index, so an install that routes around it fails closed.
+#   2. safe-chain wraps uv/uvx/pip with a second, independent threat feed
+#      (Aikido Intel) and a 48h minimum package age.
+#   3. UV_REQUIRE_HASHES (see profile.toml) forces pinned, hash-verified
+#      requirements on the `uv pip` path.
+#
+# Allows access to:
+#   - System binaries/libs                    (read + execute)
+#   - Safe pseudo-devices                     (read/write)
+#   - /etc                                    (read + list — including
+#                                              /etc/uv/uv.toml and
+#                                              /etc/uv/blender-stubs.txt)
+#   - /proc                                   (read files only, no dir listing)
+#   - /tmp                                    (full — build backend scratch)
+#   - /workspace                              (full — project source, .venv, and
+#                                              the redirected caches)
+#   - /usr/local/uv                           (read + execute, via /usr)
+#
+# Denies by omission:
+#   - ~/.ssh, ~/.claude, ~/.gnupg, ~/.npmrc
+#   - /opt/scripts, /var/log
+#   - ~/.cache and ~/.local (redirected to /workspace via UV_CACHE_DIR,
+#     UV_PYTHON_INSTALL_DIR, and UV_TOOL_DIR)
+
+abi = 6
+
+[[ruleset]]
+handled_access_fs = ["abi.all"]
+handled_access_net = ["abi.all"]
+scoped = ["abi.all"]
+
+# System binaries and libraries (includes /usr/local/uv and the Blender-bundled
+# CPython at /usr/local/blender/4.5/python via /usr)
+[[path_beneath]]
+allowed_access = ["abi.read_execute"]
+parent = ["/bin", "/lib", "/sbin", "/usr"]
+
+# Safe pseudo-devices
+[[path_beneath]]
+allowed_access = ["read_file", "write_file"]
+parent = ["/dev/full", "/dev/null", "/dev/random", "/dev/urandom", "/dev/zero"]
+
+# System configuration (read only)
+[[path_beneath]]
+allowed_access = ["read_dir", "read_file", "refer"]
+parent = ["/etc"]
+
+# /proc: read_file only (not read_dir) so build backends can read
+# /proc/self/stat etc. for CPU and memory info, but setup.py cannot list
+# /proc/ to enumerate running PIDs.
+# Note: /proc/self cannot be used here — Landlock resolves symlinks to the
+# island PID's inode at setup time, which doesn't cover child process inodes.
+[[path_beneath]]
+allowed_access = ["read_file"]
+parent = ["/proc"]
+
+# Ephemeral scratch space used by build backends for unpacking and compiling
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/tmp"]
+
+# Workspace — project source, .venv, and the redirected caches
+# (UV_CACHE_DIR=/workspace/.uv-cache and friends, see profile.toml)
+[[path_beneath]]
+allowed_access = ["abi.all"]
+parent = ["/workspace"]
+
+# Outbound HTTPS for package resolution and downloads.  The iptables firewall
+# enforces the domain allowlist — pypi.flatt.tech, and github.com for uv's
+# managed CPython builds; Landlock only needs to permit the port so connect()
+# is not blocked before iptables.
+[[net_port]]
+allowed_access = ["connect_tcp"]
+port = [443]

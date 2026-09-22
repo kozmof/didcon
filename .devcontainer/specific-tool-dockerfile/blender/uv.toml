@@ -1,0 +1,18 @@
+# uv system-level registry policy. Deployed to /etc/uv/uv.toml, root-owned and
+# world-readable (0444), containing no credentials — the Python counterpart of
+# /etc/npmrc.
+#
+# Takumi Guard is a security proxy in front of PyPI: it checks every install
+# request against a real-time threat database, blocks known-malicious packages
+# before any code executes, and quarantines newly published packages for 3 days.
+# It is the same role npm.flatt.tech plays for npm and golang.flatt.tech for Go.
+#
+# This is uv's *lowest* precedence configuration tier — a project's own uv.toml
+# or [tool.uv] table overrides it. That is acceptable for the deliberate
+# full-path bypass (/usr/local/uv/uv), but not for the sandboxed path, so
+# island/profiles/uv-workspace/profile.toml also forces UV_DEFAULT_INDEX, which
+# outranks every persistent config file.
+
+[[index]]
+url = "https://pypi.flatt.tech/simple/"
+default = true

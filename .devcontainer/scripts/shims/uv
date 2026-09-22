@@ -1,0 +1,13 @@
+#!/bin/sh
+# Wrapper that runs uv inside the island uv-workspace Landlock sandbox.
+# Building an sdist runs setup.py — arbitrary code from PyPI, executed at
+# install time — so the sandbox covers `uv pip install`, `uv sync`, `uv build`
+# and every child process they spawn.
+# The real uv binary is at /usr/local/uv/uv.
+#
+# To bypass the sandbox, use the full path:
+#   /usr/local/uv/uv pip install -e .
+# This is also the only way to escape the profile's UV_REQUIRE_HASHES=1, which
+# hash-checking mode needs for editable and Git installs — `--no-require-hashes`
+# errors out as a conflict rather than overriding an env-provided value.
+XDG_CONFIG_HOME=/etc exec island run -p uv-workspace -- /usr/local/uv/uv "$@"

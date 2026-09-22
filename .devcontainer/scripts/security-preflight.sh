@@ -73,6 +73,17 @@ check_safe_chain() {
     else
         fail "npm safe-chain-verify failed: $verify_out"
     fi
+
+    # safe-chain covers the Python toolchain too (pip, uv, uvx, poetry, pipx,
+    # pdm).  Only meaningful where uv is installed (Dockerfile.withBlender).
+    if [[ -x /usr/local/uv/uv ]]; then
+        verify_out=$(bash -i -c "uv safe-chain-verify" 2>&1)
+        if echo "$verify_out" | grep -q "OK"; then
+            pass "uv safe-chain-verify OK (hook registered)"
+        else
+            fail "uv safe-chain-verify failed: $verify_out"
+        fi
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -135,6 +146,70 @@ check_takumi_guard_golang() {
 }
 
 # ---------------------------------------------------------------------------
+# Takumi Guard (PyPI)
+# ---------------------------------------------------------------------------
+check_takumi_guard_pypi() {
+    echo ""
+    echo "==> Takumi Guard (PyPI)"
+
+    # Skip gracefully on non-Python containers (shared script).
+    if [[ ! -x /usr/local/uv/uv ]]; then
+        echo "    uv not installed — skipped"
+        return
+    fi
+
+    # Two root-owned policy files, because uv and pip share no configuration:
+    # uv does not read pip.conf or PIP_INDEX_URL, and pip does not read uv.toml.
+    local cfg
+    for cfg in /etc/uv/uv.toml /etc/pip.conf; do
+        if grep -q "pypi.flatt.tech/simple/" "$cfg" 2>/dev/null; then
+            pass "PyPI index configured: https://pypi.flatt.tech/simple/ (in $cfg)"
+        else
+            fail "pypi.flatt.tech/simple/ not found in $cfg"
+        fi
+
+        if [[ -e "$cfg" ]] && [[ "$(stat -c %U "$cfg" 2>/dev/null)" == "root" ]] && [[ ! -w "$cfg" ]]; then
+            pass "registry policy is root-owned and not writable: $cfg"
+        else
+            fail "registry policy is missing or writable by dev: $cfg"
+        fi
+    done
+
+    # /etc/uv/uv.toml is uv's lowest-precedence config tier, so a project-level
+    # uv.toml in /workspace could override it.  The uv-workspace profile forces
+    # UV_DEFAULT_INDEX, which outranks every config file — assert that it is
+    # actually reaching uv, since a silent env-redirect failure would leave
+    # installs pointing wherever the project says.
+    local index_out
+    index_out=$(XDG_CONFIG_HOME=/etc island run -p uv-workspace -- \
+                /usr/bin/env 2>/dev/null | grep '^UV_DEFAULT_INDEX=' || true)
+    if [[ "$index_out" == "UV_DEFAULT_INDEX=https://pypi.flatt.tech/simple/" ]]; then
+        pass "uv-workspace forces UV_DEFAULT_INDEX (project config cannot override)"
+    else
+        fail "uv-workspace does not force UV_DEFAULT_INDEX (got '${index_out:-unset}')"
+    fi
+
+    # Hash-checking mode, the third layer after Takumi Guard and safe-chain.
+    local hashes_out
+    hashes_out=$(XDG_CONFIG_HOME=/etc island run -p uv-workspace -- \
+                 /usr/bin/env 2>/dev/null | grep '^UV_REQUIRE_HASHES=' || true)
+    if [[ "$hashes_out" == "UV_REQUIRE_HASHES=1" ]]; then
+        pass "uv-workspace forces UV_REQUIRE_HASHES=1"
+    else
+        fail "uv-workspace does not force UV_REQUIRE_HASHES (got '${hashes_out:-unset}')"
+    fi
+
+    # Any HTTP response (including 4xx) means the endpoint is up.
+    local http_code
+    http_code=$(wget --timeout=5 --server-response -qO- https://pypi.flatt.tech/simple/ 2>&1 | awk '/HTTP\//{code=$2} END{print code+0}')
+    if [[ "${http_code:-0}" -gt 0 ]]; then
+        pass "pypi.flatt.tech reachable (HTTP $http_code)"
+    else
+        fail "pypi.flatt.tech not reachable (network or firewall issue)"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Island
 # ---------------------------------------------------------------------------
 check_island() {
@@ -159,7 +234,7 @@ check_island() {
     local profile_base="/etc/island/profiles"
     local profile protected_path
 
-    for profile in claude-code codex herdr npm-workspace pnpm-workspace git-workspace go-workspace cargo-workspace zig-workspace; do
+    for profile in claude-code codex herdr npm-workspace pnpm-workspace git-workspace go-workspace cargo-workspace zig-workspace blender-workspace uv-workspace; do
         if [[ -d "$profile_base/$profile" ]]; then
             pass "profile present: $profile"
         else
@@ -401,6 +476,84 @@ check_island() {
         fi
     fi
 
+    # blender-workspace and uv-workspace: the two untrusted-execution paths in
+    # the Blender addon image.  `blender -b --python` runs addon code, which
+    # arrives as third-party zips with nothing screening it; `uv` builds sdists,
+    # which runs setup.py.  Skipped unless the image ships Blender
+    # (specific-tool-dockerfile/blender/Dockerfile.withBlender).
+    if [[ -x /usr/local/blender/blender ]]; then
+        local tool_bin
+        for tool_bin in /usr/local/blender/blender /usr/local/uv/uv /usr/local/uv/uvx; do
+            if [[ -x "$tool_bin" ]] && [[ "$(stat -c %U "$tool_bin" 2>/dev/null)" == "root" ]] && [[ ! -w "$tool_bin" ]]; then
+                pass "toolchain asset is root-owned and not writable: $tool_bin"
+            else
+                fail "toolchain asset is writable or missing: $tool_bin"
+            fi
+        done
+
+        local shim_path
+        for shim_path in blender:blender-workspace uv:uv-workspace uvx:uv-workspace; do
+            local shim_name=${shim_path%%:*}
+            local shim_profile=${shim_path##*:}
+            local resolved
+            resolved=$(type -P "$shim_name" 2>/dev/null || true)
+            if grep -q "island run -p $shim_profile" "$resolved" 2>/dev/null; then
+                pass "$shim_name shim uses island ($resolved)"
+            else
+                fail "$shim_name at '$resolved' does not use the $shim_profile profile"
+            fi
+        done
+
+        sandbox_blocks blender-workspace ls /opt/scripts
+        sandbox_blocks blender-workspace ls /var/log
+        sandbox_allows blender-workspace ls /workspace
+        sandbox_allows blender-workspace ls /tmp
+
+        sandbox_blocks uv-workspace ls /opt/scripts
+        sandbox_blocks uv-workspace ls /var/log
+        sandbox_allows uv-workspace ls /workspace
+        sandbox_allows uv-workspace ls /tmp
+
+        if blender --version >/dev/null 2>&1; then
+            pass "sandboxed Blender responds"
+        else
+            fail "sandboxed Blender does not respond"
+        fi
+        if uv --version >/dev/null 2>&1; then
+            pass "sandboxed uv responds"
+        else
+            fail "sandboxed uv does not respond"
+        fi
+
+        # Blender's user resources are redirected into /workspace so that an
+        # agent-spawned Blender can reach them: Landlock domains nest by
+        # intersection, and no agent policy grants ~/.config.  If this ever
+        # stops holding, addon installs fail somewhere far from the cause.
+        local user_res
+        user_res=$(blender -b --factory-startup --python-expr \
+            "import bpy; print('RESOURCE_PATH=' + bpy.utils.resource_path('USER'))" 2>/dev/null |
+            sed -n 's/^RESOURCE_PATH=//p')
+        if [[ "$user_res" == /workspace/.blender-user* ]]; then
+            pass "Blender user resources redirected into the workspace: $user_res"
+        else
+            fail "Blender user resources are at '${user_res:-unknown}' — expected /workspace/.blender-user (BLENDER_USER_RESOURCES not honoured)"
+        fi
+
+        # Landlock domains nest by intersection, so an agent that cannot execute
+        # these binaries cannot spawn them no matter what the tool profiles
+        # allow.  /usr/local/blender and /usr/local/uv are covered by the agents'
+        # existing /usr grant, which is why this image needs no
+        # profiles-blender/ overlay — assert that it holds.
+        for profile in claude-code codex; do
+            sandbox_allows "$profile" /usr/local/blender/blender --version
+            sandbox_allows "$profile" /usr/local/uv/uv --version
+        done
+        if [[ -x /opt/herdr/bin/herdr ]]; then
+            sandbox_allows herdr /usr/local/blender/blender --version
+            sandbox_allows herdr /usr/local/uv/uv --version
+        fi
+    fi
+
     # git-workspace: protects against compromised git hooks
     # Blocked: /opt/scripts, /var/log, /home/dev/.npmrc (unlike npm-workspace)
     # Allowed: /workspace (git repos), /tmp (SSH_AUTH_SOCK lives here)
@@ -467,6 +620,7 @@ check_island() {
 check_safe_chain
 check_takumi_guard
 check_takumi_guard_golang
+check_takumi_guard_pypi
 check_island
 
 echo ""

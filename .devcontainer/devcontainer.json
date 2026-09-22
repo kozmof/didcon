@@ -2,6 +2,19 @@
 {
   "name": "didcon",
   "build": {
+    // Language variant. Dockerfile is Node-only; Dockerfile.withGo,
+    // Dockerfile.withRust, and Dockerfile.withZig add a toolchain.
+    //
+    // The Blender addon variant lives in its own subdirectory, so switching to
+    // it means changing TWO keys — "context" is not optional there. Without it the
+    // context defaults to the Dockerfile's own directory and the build fails on
+    // the first COPY with `"/extra-whitelist.conf": not found`:
+    //
+    //   "dockerfile": "specific-tool-dockerfile/blender/Dockerfile.withBlender",
+    //   "context": ".",
+    //
+    // "context": "." means .devcontainer, which is what every COPY in the
+    // Dockerfiles is relative to.
     "dockerfile": "Dockerfile",
     // Re-resolve the `latest-dev` base tag on every build. The base image is the
     // one unpinned input here, and `apk add` installs packages built against the

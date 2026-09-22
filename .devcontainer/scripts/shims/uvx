@@ -1,0 +1,9 @@
+#!/bin/sh
+# Wrapper that runs uvx inside the island uv-workspace Landlock sandbox.
+# uvx installs and immediately executes a tool from PyPI, so it is the shortest
+# path from a package name to running code — see the uv shim for details.
+# The real uvx binary is at /usr/local/uv/uvx.
+#
+# To bypass the sandbox, use the full path:
+#   /usr/local/uv/uvx <tool>
+XDG_CONFIG_HOME=/etc exec island run -p uv-workspace -- /usr/local/uv/uvx "$@"
