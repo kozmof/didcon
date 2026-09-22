@@ -14,6 +14,30 @@ git clone <this-repo> /tmp/didcon
 /tmp/didcon/setup.sh /path/to/your/project
 ```
 
+It asks two questions and writes both answers into the copied
+devcontainer.json, so the language variant and the container name need no
+hand-editing afterwards:
+
+```
+Which Dockerfile should devcontainer.json build?
+
+  1) Dockerfile                                              Node only
+  2) Dockerfile.withGo                                       Node + Go
+  3) Dockerfile.withRust                                     Node + Rust
+  4) Dockerfile.withZig                                      Node + Zig
+  5) specific-tool-dockerfile/blender/Dockerfile.withBlender Node + headless Blender and uv
+
+Choice [1]: 5
+"name" in devcontainer.json [your-project]:
+```
+
+Choosing the Blender variant also writes the `"context": "."` line it
+requires. The name defaults to the target directory's basename rather than
+"didcon", so containers from different projects stay distinguishable.
+
+--name web-api answers the second question up front. With no terminal to ask
+on, both defaults are taken.
+
 TARGET_DIR defaults to the current directory if omitted. The script
 refuses to run if the target already has a .devcontainer, so it never
 overwrites an existing setup. Use patch.sh for that.
@@ -50,8 +74,12 @@ and Dockerfile.withZig adds Zig. The fifth,
 specific-tool-dockerfile/blender/Dockerfile.withBlender, is for Blender addon
 development and adds headless Blender plus uv.
 
+setup.sh asks which of the five to use and writes the choice into
+devcontainer.json; switching later means editing it by hand.
+
 The Blender variant lives in its own subdirectory rather than beside the
-others, so devcontainer.json needs the context spelled out:
+others, so devcontainer.json needs the context spelled out (setup.sh writes
+both keys when you pick it):
 
 ```json
 "build": {
