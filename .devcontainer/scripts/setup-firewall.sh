@@ -137,6 +137,15 @@ add_domain_to_set() {
     fi
 
     for ip in "${resolved_ips[@]}"; do
+        # `dig +short A` prints the CNAME chain before the A records, so a
+        # trailing-dot hostname here is expected output for any CNAME'd domain
+        # (files.pythonhosted.org -> dualstack.python.map.fastly.net.), not an
+        # anomaly. Skip those quietly; the A records that follow are what get
+        # added. Warn only on values that are neither.
+        if [[ "$ip" == *. ]] && [[ ! "$ip" =~ ^[0-9.]+\.$ ]]; then
+            continue
+        fi
+
         if ! validate_ip "$ip"; then
             warn "unexpected value resolving $label ($domain): $ip"
             continue

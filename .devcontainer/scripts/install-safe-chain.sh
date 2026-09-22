@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-VERSION=1.5.8
-SHA256=abf0d2a580ecb43270f559814edeb5671dd089839fe67478bf9a11acdb2813a0
+VERSION=1.5.20
+SHA256=0ad25efe15d1fa56105157a454d647223e78eb0c53d1f85e3d10afcd722e7bfd
 URL="https://github.com/AikidoSec/safe-chain/releases/download/${VERSION}/install-safe-chain.sh"
 INSTALLER=$(mktemp)
 trap 'rm -f "$INSTALLER"' EXIT HUP INT TERM
