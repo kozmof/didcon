@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: setup.sh [TARGET_DIR] [--name NAME]
+# Usage: setup.sh [TARGET_DIR]
 #
 #   Clone this repository, then run this script to place .devcontainer
 #   at the root of your project. It asks which Dockerfile variant to build
@@ -7,8 +7,6 @@
 #   copied devcontainer.json so nothing has to be edited by hand.
 #
 #   TARGET_DIR  Directory to install .devcontainer into (default: current directory)
-#   --name      Value for "name" in devcontainer.json; skips that question
-#               (default: the target directory's basename)
 #
 # Example:
 #   git clone <this-repo> /tmp/didcon
@@ -33,28 +31,7 @@ VARIANT_DESCS=(
   "Node + headless Blender and uv"
 )
 
-usage() {
-  sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed -e 's/^# \{0,1\}//' -e '/^set -euo/d'
-}
-
-TARGET_DIR=""
-NAME=""
-
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --name)
-      [ $# -ge 2 ] || { echo "Error: --name needs a value." >&2; exit 1; }
-      NAME="$2"; shift 2 ;;
-    --name=*) NAME="${1#*=}"; shift ;;
-    -h|--help) usage; exit 0 ;;
-    -*) echo "Error: unknown option '$1'." >&2; exit 1 ;;
-    *)
-      [ -z "$TARGET_DIR" ] || { echo "Error: unexpected argument '$1'." >&2; exit 1; }
-      TARGET_DIR="$1"; shift ;;
-  esac
-done
-
-TARGET_DIR="${TARGET_DIR:-$(pwd)}"
+TARGET_DIR="${1:-$(pwd)}"
 # Strip trailing slashes so paths don't render as "foo//.devcontainer"
 # (but keep a lone "/" intact).
 while [ "${TARGET_DIR}" != "/" ] && [ "${TARGET_DIR%/}" != "${TARGET_DIR}" ]; do
@@ -136,12 +113,8 @@ valid_name() {
   return 0
 }
 
-if [ -n "$NAME" ]; then
-  valid_name "$NAME" || {
-    echo "Error: invalid name '$NAME' (no quotes, backslashes, or control characters)." >&2
-    exit 1
-  }
-elif [ -n "$TTY" ]; then
+NAME="$default_name"
+if [ -n "$TTY" ]; then
   while true; do
     printf '"name" in devcontainer.json [%s]: ' "$default_name"
     IFS= read -r reply <"$TTY" || reply=""
@@ -152,8 +125,6 @@ elif [ -n "$TTY" ]; then
     fi
     echo "  Please avoid quotes, backslashes, and control characters."
   done
-else
-  NAME="$default_name"
 fi
 
 cp -r "$SCRIPT_DIR/.devcontainer" "$TARGET_DIR/.devcontainer"

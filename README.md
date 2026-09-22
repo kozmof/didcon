@@ -35,8 +35,7 @@ Choosing the Blender variant also writes the `"context": "."` line it
 requires. The name defaults to the target directory's basename rather than
 "didcon", so containers from different projects stay distinguishable.
 
---name web-api answers the second question up front. With no terminal to ask
-on, both defaults are taken.
+With no terminal to ask on, both defaults are taken.
 
 TARGET_DIR defaults to the current directory if omitted. The script
 refuses to run if the target already has a .devcontainer, so it never
