@@ -26,6 +26,19 @@ One pin lives outside the Dockerfiles entirely: safe-chain is installed at
 its own `VERSION` and `SHA256`. That file is shared by every variant, so a bump
 there changes all of them at once.
 
+The Smokescreen sidecar has separate pins in
+[`egress/Dockerfile`](../egress/Dockerfile): the full source commit, archive SHA256,
+Go compiler image digest, and distroless runtime image digest. Update the source
+commit in the image label and the local image tag in
+[`host/compose_config.py`](../host/compose_config.py) together. Keep the vendored
+dependencies from the same upstream archive. Build the sidecar to run its Go TLS,
+ACL, DNS, and CA tests, then rerun `tests/integration_proxy.py` both normally and
+with `--packaged --workflows` before adopting the upgrade. The compiler is pinned
+to Go 1.27.3; check [Go releases](https://go.dev/dl/) for security updates when
+updating it. Recheck the Dockerfile's one-line goproxy HTTP/1.1 CONNECT change;
+remove it only if the upstream implementation and safe-chain workflow both pass
+without it.
+
 | Tool | ARG(s) | Default | Notes |
 |---|---|---|---|
 | Claude Code | `CLAUDE_CODE_VERSION` | `latest` | npm latest dist-tag |

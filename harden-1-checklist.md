@@ -6,7 +6,7 @@ Work through Phases 1–3 in order. Phase 4 contains additional controls; filter
 
 ## Recovery checkpoint (2026-10-24)
 
-Phases 1–3 are substantially implemented. The Node image build, 23 Python tests,
+Phases 1–3 are substantially implemented. The Node image build, 19 Python tests,
 Node mount-check tests, and disposable Docker mount, volume/export, and TLS proxy
 integration tests passed. No hardening test containers remained running after
 recovery. See the [validation record](.devcontainer/docs/hardening-validation.md)
@@ -24,6 +24,13 @@ Final packaged-image workflow validation passed, including the complete producti
 preflight: **60 passed, 0 failed, 0 warnings**. Actual IDE and non-Node tool checks
 remain before narrowing `/tmp` grants. The next open runtime checks are the other
 language variants, agent authentication/API paths, and the optional herdr binary.
+
+**Smokescreen migration:** the default proxy now uses pinned Stripe Smokescreen
+with mandatory TLS inspection and CONNECT/SNI/Host equality. Its eight Go security
+tests replace the four Python proxy-policy tests; the remaining 19 Python tests
+still pass. Packaged Node workflows pass through Smokescreen, including safe-chain
+and the full **60 passed, 0 failed, 0 warnings** preflight. Planning files remain
+because the wider hardening validation matrix is incomplete.
 
 ## Preparation
 
@@ -99,6 +106,11 @@ Plan: [Phase 3](harden-1.md#phase-3-egress-proxy-sidecar).
 ### Design and implementation
 
 - [x] Select a proxy and record the policy it will enforce for CONNECT destinations, TLS SNI, and HTTP authority.
+- [x] Replace mitmproxy with Smokescreen, pin its source archive and build/runtime images, and require TLS inspection for every accepted CONNECT.
+- [x] Enforce CONNECT/SNI/Host equality, verified upstream TLS, exact DNS names, and denial of client-selected upstream proxies; keep the separate network guard.
+- [x] Preserve the existing CA during migration, mount private keys read-only in the proxy, and publish only its certificate; test restart, legacy-key migration, invalid permissions, and missing-key failure.
+- [x] Cover the Smokescreen wrapper with eight Go security tests, including real local TLS handshakes, upstream certificate rejection, DNS response filtering, and HTTP/1.1 CONNECT compatibility with safe-chain.
+- [x] Validate packaged Node safe-chain, npm/npx/pnpm, nested agent profiles, Git HTTPS, and all 60 production preflight checks through Smokescreen.
 - [x] Decide whether TLS interception is required; document certificate trust requirements and any retained domain-fronting risk.
 - [x] Add a Compose configuration with a dedicated internal development network and external egress enforcement outside the development container.
 - [x] Allow only the intended proxy path and required internal services from the development container.

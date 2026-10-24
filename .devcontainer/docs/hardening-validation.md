@@ -13,7 +13,8 @@ working tree; the planning files remain until the remaining work is complete.
 | Host Python / Node | `3.12.3` / `v24.11.1` |
 | Built Node test image | `didcon-hardening-test:node` |
 | Current image ID | `sha256:8d140e5fe350094a1401103ad59b8ccc39b9c44d8655760c7eb776a2c864b2a4` |
-| Proxy | mitmproxy `12.2.3`, digest pinned in `host/compose_config.py` |
+| Proxy | Smokescreen commit `68e7b8218e226bc47d09ce705fdb8fed82145ceb`, source SHA256 and image digests pinned in `egress/Dockerfile` |
+| Proxy compiler/runtime | Go `1.27.3` / distroless static, UID `1000:1000` |
 | IDE / Dev Containers extension versions | Not yet recorded or validated |
 
 No `didcon-*` test containers were left running when recovery checked Docker.
@@ -23,7 +24,8 @@ Compose services, networks, and volumes. The crash cause has not been establishe
 ## Passed checks
 
 - Node Dockerfile built successfully from the repository source.
-- `python3 -m unittest discover -s tests -q`: 23 tests passed again after recovery.
+- `python3 -m unittest discover -s tests -q`: 19 tests passed after the
+  Smokescreen migration; its eight Go tests replace four Python proxy tests.
 - `node --test tests/test_host_integration.js`: passed again after recovery.
 - `python3 tests/integration_mounts.py --image didcon-hardening-test:node`: passed.
   Protected files/directories and ancestor anchors resist writes, removal, and
@@ -84,7 +86,54 @@ It verified:
 
 The protected mount, tmpfs, npx, socket, and credential regression suite also
 passed again after the scratch changes. All 25 island TOML files parsed, shell/JS
-syntax checks passed, and the Python suite still has 23 passing tests.
+syntax checks passed, and the Python suite had 23 passing tests at that checkpoint.
+
+## Smokescreen migration (2026-10-24)
+
+The default sidecar now builds a small didcon wrapper around pinned Smokescreen.
+The build verifies the source archive SHA256, uses upstream vendored dependencies
+without network access during compilation, runs eight Go security tests, and
+produces a static binary in a shell-free distroless runtime. The running proxy has
+read-only access to the CA key volume. Existing combined `mitmproxy-ca.pem` keys
+are validated and reused; only the certificate is published to development
+containers. Unit fixtures verify migration preserves the key and certificate,
+restart is idempotent, and invalid, over-permissive, symlinked, or missing keys
+cannot silently trigger CA replacement.
+
+The TLS tests use local servers and exercise real CONNECT and TLS parsing. They
+verify mandatory inspection, exact hostnames, ports, matching CONNECT/SNI/Host,
+missing SNI, mismatched **allowlisted** Host names, absolute-URL mismatches,
+client-selected upstream proxy rejection, pinned dial addresses, wrong upstream
+certificate hostnames, and untrusted upstream certificates. DNS fixtures reject
+private/reserved/IPv6 answers and mixed public/private responses. Live DNS
+rebinding and actual forwarded IDE integrations remain outside this coverage.
+
+The package workflow exposed a compatibility bug in the vendored goproxy:
+safe-chain rejects its HTTP/1.0 MITM CONNECT success response. The Dockerfile
+changes that line to HTTP/1.1; the Go TLS test requires HTTP/1.1 to prevent
+regression. Request URLs, headers, and bodies are not logged by the proxy.
+
+The following packaged-image checks pass against Smokescreen:
+
+```sh
+python3 -m unittest discover -s tests -q
+node --test tests/test_host_integration.js
+python3 tests/integration_proxy.py --image didcon-hardening-test:node --packaged
+python3 tests/integration_proxy.py --image didcon-hardening-test:node --packaged --workflows
+```
+
+The Node application image is unchanged from the image recorded above. Workflows
+again pass safe-chain installation, npm/npx/pnpm, nested agent-profile scratch,
+Git HTTPS, and **60 passed, 0 failed, 0 warnings** in the production preflight.
+Disposable Docker checks run as both dev and root and retain direct IPv4/IPv6,
+metadata, Docker DNS, private-CA isolation, malformed-policy, and stopped-proxy
+denials. The SNI attack deliberately disables **client-side** certificate
+verification so it proves enforcement by the proxy. Production upstream
+verification remains enabled. Both suites clean up their own containers and volumes.
+
+Logs: `/tmp/didcon-smokescreen-integration.log` and
+`/tmp/didcon-smokescreen-workflows.log`. Build the sidecar with
+`docker build .devcontainer/egress` to reproduce its Go tests.
 
 ## Remaining work
 

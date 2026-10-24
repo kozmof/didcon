@@ -13,6 +13,15 @@ production preflight checks. See the [validation record](.devcontainer/docs/hard
 and [task checklist](harden-1-checklist.md). These planning files remain until the
 outstanding work is complete.
 
+**Proxy selection:** Phase 3 now uses Stripe Smokescreen at commit
+`68e7b8218e226bc47d09ce705fdb8fed82145ceb`, with a didcon Go wrapper requiring
+TLS inspection and matching CONNECT, SNI, and decrypted HTTPS authority.
+Upstream TLS verification is enabled explicitly, client-selected upstream proxies
+are denied, and any non-public DNS answer rejects the complete lookup. Existing
+proxy CA identities are retained during migration. The pinned build includes an
+HTTP/1.1 CONNECT compatibility change for safe-chain. See the operational
+[migration instructions](.devcontainer/docs/hardening.md#tls-inspecting-egress).
+
 didcon limits normal agent CLI invocations and package-manager subprocesses through island, but gaps remain in host integration, writable host files, and outbound traffic. The first priorities are disabling host credential and socket forwarding, protecting host-executed configuration and Git metadata, and offering a volume-based workspace for untrusted code.
 
 - **Do now:** disable unnecessary host forwarding and extend targeted read-only protection. Protect submodule `.git` pointer files as well as their configuration and hooks. A root-level `.devcontainer.json` placeholder must itself be protected against replacement.

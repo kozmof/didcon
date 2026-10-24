@@ -3,7 +3,7 @@ import hashlib
 from pathlib import Path
 
 
-PROXY_IMAGE = "mitmproxy/mitmproxy:12.2.3@sha256:00b77b5d8804c8ad18cb6caefbf9d5849e895e8986c5ce011f4ae30f4385962f"
+PROXY_IMAGE = "didcon-smokescreen:68e7b8218e22"
 
 
 def generate(root, state, mounts, build, environment):
@@ -40,20 +40,21 @@ def generate(root, state, mounts, build, environment):
                 "REQUESTS_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt", "CURL_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt"})
     common = {"security_opt": ["no-new-privileges:true"], "cap_drop": ["ALL"], "init": True}
     compose_build = {"context": ".", "dockerfile": build["dockerfile"], "args": build.get("args", {}), "pull": True}
+    proxy_build = {"context": "./egress", "dockerfile": "Dockerfile", "pull": True}
     return {"name": project, "services": {
-        "cert-init": {**common, "image": PROXY_IMAGE, "user": "0:0", "network_mode": "none",
+        "cert-init": {**common, "image": PROXY_IMAGE, "build": proxy_build, "user": "0:0", "network_mode": "none",
             "cap_add": ["CHOWN", "DAC_OVERRIDE", "FOWNER"], "read_only": True,
-            "entrypoint": ["python3", "/policy/init-ca.py"], "environment": {"PYTHONDONTWRITEBYTECODE": "1"},
-            "volumes": [policy, "proxy-keys:/pki", "proxy-trust:/trust"], "tmpfs": ["/tmp:size=32m"],
+            "entrypoint": ["/didcon-proxy", "init-ca"], "command": [],
+            "volumes": ["proxy-keys:/pki", "proxy-trust:/trust"], "tmpfs": ["/tmp:size=32m"],
             "mem_limit": "128m", "pids_limit": 64},
-        "proxy": {**common, "image": PROXY_IMAGE, "user": "1000:1000", "read_only": True,
+        "proxy": {**common, "image": PROXY_IMAGE, "build": proxy_build, "user": "1000:1000", "read_only": True,
             "depends_on": {"cert-init": {"condition": "service_completed_successfully"}},
             "sysctls": {"net.ipv4.ip_unprivileged_port_start": "0"},
-            "entrypoint": ["python3", "/policy/run.py"],
-            "environment": {"PYTHONDONTWRITEBYTECODE": "1"}, "volumes": [policy, "proxy-keys:/pki"],
+            "entrypoint": ["/didcon-proxy", "serve"], "command": [],
+            "volumes": [policy, "proxy-keys:/pki:ro"],
             "tmpfs": ["/tmp:size=64m"], "mem_limit": "512m", "pids_limit": 128,
             "networks": {"isolated": {"ipv4_address": proxy_ip}, "upstream": {}},
-            "healthcheck": {"test": ["CMD", "python3", "/policy/health.py"],
+            "healthcheck": {"test": ["CMD", "/didcon-proxy", "health"],
                             "interval": "2s", "timeout": "3s", "retries": 20}},
         "network-guard": {**common, "image": image, "cap_add": ["NET_ADMIN", "NET_RAW"],
             "user": "0:0", "read_only": True, "entrypoint": ["/bin/bash", "/policy/guard.sh"],

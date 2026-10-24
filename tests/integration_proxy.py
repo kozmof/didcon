@@ -54,6 +54,7 @@ def main():
 
         try:
             compose('config', '--quiet')
+            compose('build', 'proxy')
             compose('up', '-d', '--no-build', '--wait', '--wait-timeout', '90')
             if args.workflows:
                 compose('exec', '-T', '--user', 'dev', 'devcontainer', '/bin/bash', '/tests/integration_workflows.sh')

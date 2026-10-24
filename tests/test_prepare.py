@@ -202,6 +202,11 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(client['environment']['GOTELEMETRY'], 'off')
         self.assertTrue(compose['networks']['isolated']['internal'])
         self.assertFalse(any(mount.get('source') == 'proxy-keys' for mount in client['volumes']))
+        proxy = compose['services']['proxy']
+        self.assertEqual(proxy['entrypoint'], ['/didcon-proxy', 'serve'])
+        self.assertEqual(proxy['build']['context'], './egress')
+        self.assertIn('proxy-keys:/pki:ro', proxy['volumes'])
+        self.assertEqual(compose['services']['cert-init']['image'], proxy['image'])
         compose_path.write_text('{}')
         with self.assertRaisesRegex(prepare.PreparationError, 'topology changed'):
             self.verify()

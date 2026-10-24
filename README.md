@@ -38,7 +38,7 @@ requires. The name defaults to the target directory's basename rather than
 
 With no terminal, defaults are used. Set `DIDCON_WORKSPACE_MODE=volume` for an
 isolated workspace seeded from committed HEAD; bind mode shares the trusted
-host checkout. New setups use the external TLS-inspecting proxy by default.
+host checkout. New setups use the external TLS-inspecting Smokescreen proxy by default.
 See [hardening and reviewed exports](.devcontainer/docs/hardening.md) for host
 forwarding settings, setup prerequisites, storage limits, and remaining risks.
 

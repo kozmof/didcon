@@ -7,7 +7,7 @@ Native Windows shell support and remote Docker daemons are not validated.
 ## Workspace choices
 
 `setup.sh` asks for a language image, a display name, and a workspace mode.
-New installations use the TLS-inspecting egress proxy by default.
+New installations use the TLS-inspecting Smokescreen egress proxy by default.
 
 ```sh
 # Untrusted development: seed a volume from the project's committed HEAD.
@@ -176,7 +176,7 @@ rather than resetting an existing volume automatically.
 Preparation generates four Compose services:
 
 - `cert-init` creates a CA in a proxy-only volume and publishes its public certificate.
-- `proxy` runs digest-pinned mitmproxy with the exact hostname policy.
+- `proxy` runs Smokescreen with a didcon wrapper enforcing the exact hostname policy.
 - `network-guard` owns firewall rules in a separate container and network namespace.
 - `devcontainer` shares that network namespace with no NET_ADMIN or NET_RAW.
 
@@ -193,6 +193,20 @@ addresses, metadata addresses, and mismatched identities are denied. Allowlists
 are exact names in `egress/allowed-hosts.txt`; wildcards and CIDRs are rejected.
 The proxy listens on port 443, which existing agent TCP policies already allow.
 
+`egress/Dockerfile` pins Smokescreen commit
+`68e7b8218e226bc47d09ce705fdb8fed82145ceb`, the source archive checksum, and the Go
+build and distroless runtime image digests. Its vendored dependencies build without
+network access, and the build runs the Go security tests. The runtime contains a
+single static binary and CA roots, with no shell or Python. It runs as UID 1000
+with the CA volume read-only. The wrapper requires inspection for every CONNECT,
+rejects missing/mismatched SNI and client-selected upstream proxies, and enables
+upstream TLS verification explicitly. Any non-public DNS answer rejects the whole
+lookup, including mixed public/private answers. Decrypted client connections use
+HTTP/1.1; clients that require HTTP/2 without fallback are unsupported. Requests,
+headers, bodies, and URLs are not logged; health checks exercise an actual ACL denial.
+The Dockerfile changes goproxy's MITM CONNECT success line to HTTP/1.1 for
+safe-chain compatibility; the Go TLS fixture requires that response version.
+
 The development container receives proxy environment variables and the public
 CA certificate; its system trust store is extended at startup. The CA private
 key stays in the proxy-only volume. TLS inspection exposes approved HTTPS
@@ -200,6 +214,25 @@ traffic to this trusted sidecar; it does not provide data-loss prevention for
 approved services. Some tools or certificate-pinned clients may need additional
 integration or remain unsupported. Do not disable TLS verification to make a
 client work.
+
+When upgrading an existing proxy installation, retain its named volumes. The
+initializer validates and reuses `mitmproxy-ca.pem`, writing the same identity to
+`smokescreen-ca.pem` and publishing only the certificate. Invalid, expired, missing,
+or insecurely permissioned existing keys fail startup and require explicit repair or rotation;
+the initializer never silently replaces an existing CA. Regenerate the topology
+on the host, build the sidecar, then use **Dev Containers: Rebuild Container**:
+
+```sh
+python3 .devcontainer/host/prepare.py --egress proxy .
+docker compose -f .devcontainer/compose.generated.json build proxy cert-init
+```
+
+Rebuild after changing the wrapper or its source pins. For a standalone sidecar
+build (including its tests):
+
+```sh
+docker build -t didcon-smokescreen:68e7b8218e22 .devcontainer/egress
+```
 
 Generated networks use a project-derived `172.30.x.0/28` subnet. Resolve address
 conflicts by adjusting the reviewed generator policy and regenerating; direct
