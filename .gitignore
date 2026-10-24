@@ -3,3 +3,4 @@ __pycache__/
 .devcontainer/didcon-manifest.json
 .devcontainer/seed.bundle
 .devcontainer/compose.generated.json
+.devcontainer/socket-allowlist.json

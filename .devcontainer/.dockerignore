@@ -1,4 +1,5 @@
 didcon-manifest.json
 seed.bundle
 compose.generated.json
+socket-allowlist.json
 **/__pycache__

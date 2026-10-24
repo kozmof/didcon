@@ -72,8 +72,11 @@ if (process.getuid() === 0) {
     const explicit = doctor(['--offline', '--credential-fixture'], env);
     assert.equal(explicit.code, 1, JSON.stringify({ markerCalled: fs.existsSync(marker), preflight: explicit.report.preflight,
       results: explicit.report.checks.filter(check => check.section === 'Security preflight') }));
+    assert.equal(explicit.report.summary.fail, 1, 'Doctor counted the same host-integration failure twice');
     assert.equal(fs.existsSync(marker), true);
     assert.ok(explicit.report.checks.some(check => check.id.startsWith('preflight.Host integrations') && check.status === 'fail'));
+    assert.ok(explicit.report.checks.find(check => check.id.startsWith('preflight.Host integrations')).details
+      .some(detail => detail.type === 'credential-fixture'));
     console.log('PASS: disposable credential probe requires explicit opt-in and suppresses dummy values');
   } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
 }

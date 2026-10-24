@@ -27,6 +27,9 @@ identity enforcement. Only small temporary write probes are created and removed.
 
 Exit: 0 = no failures; 1 = failures (or strict warnings); 2 = invalid arguments.
 No real credential helper is invoked unless --credential-fixture is supplied.
+To accept particular socket findings, run on the host:
+  python3 .devcontainer/host/allow-sockets.py PROJECT
+Paste exact socket paths or doctor finding lines, then type approve to save.
 `;
 
 function parseOptions(args) {
@@ -129,17 +132,58 @@ function preflightGroups(output) {
   const names = ['safe-chain', 'Takumi Guard', 'Takumi Guard (Go)', 'Takumi Guard (PyPI)', 'Island',
     'Host integrations and mounts (repeat after attach/reconnect)', 'Egress policy'];
   const groups = new Map();
+  const structuredHostGroups = new Set();
   let current;
   for (const line of output.split('\n')) {
     if (line.startsWith('==> ') && names.includes(line.slice(4))) {
       current = line.slice(4);
       groups.set(current, { name: current, pass: 0, fail: 0, warn: 0 });
     }
+    if (current?.startsWith('Host integrations') && line.startsWith('{')) {
+      try {
+        const report = JSON.parse(line);
+        if (report.kind === 'didcon-host-integration' && report.schemaVersion === 1 && Array.isArray(report.checks)) {
+          const group = groups.get(current);
+          structuredHostGroups.add(current);
+          group.details = [];
+          for (const check of report.checks) {
+            if (!['pass', 'fail', 'warn'].includes(check.status)) continue;
+            group[check.status]++;
+            if (check.status === 'pass') continue;
+            if (check.type === 'socket' && typeof check.socket === 'string' && check.socket.startsWith('/')) {
+              const accepted = check.status === 'warn' && check.accepted === 'socket-allowlist';
+              group.details.push({ type: 'socket', socket: check.socket, status: check.status,
+                ...(accepted ? { accepted: 'socket-allowlist' } : {}),
+                message: `${accepted ? 'Approved socket exposure' : 'Socket reachable or isolation unverified'}: ${JSON.stringify(check.socket)}` });
+            } else {
+              const messages = { mount: 'Protected mount verification failed', scratch: 'Shared scratch verification failed',
+                'credential-config': 'Git credential-helper configuration requires review',
+                'socket-policy': 'Socket approval file is invalid or not protected by the host',
+                'credential-fixture': 'Disposable credential fixture is exposed or unverified' };
+              const known = Object.hasOwn(messages, check.type);
+              group.details.push({ type: known ? check.type : 'unknown',
+                message: known ? messages[check.type] : 'Host-integration verification failed' });
+            }
+          }
+        }
+      } catch { /* A malformed structured record cannot replace the aggregate result. */ }
+    }
     const status = line.match(/^\[(PASS|FAIL|WARN)\]/)?.[1].toLowerCase();
-    if (status && current) groups.get(current)[status]++;
+    const aggregateHostResult = line === '[PASS] host integration and mount checks' ||
+      line === '[FAIL] host integration or mount exposure detected; see checks above' ||
+      line === '[WARN] host integration checks include approved socket exposures; see checks above';
+    if (status && current && !(structuredHostGroups.has(current) && aggregateHostResult)) groups.get(current)[status]++;
   }
   const match = output.match(/==> Summary: (\d+) passed, (\d+) failed, (\d+) warnings/);
   return { groups: [...groups.values()], totals: match ? { pass: +match[1], fail: +match[2], warn: +match[3] } : null };
+}
+
+function preflightOutcome(result, parsed) {
+  const cleanExit = !result.signal && !result.timedOut && !result.overflow && !result.errorCode;
+  const reportedFailure = parsed.groups.some(group => group.fail > 0);
+  if (cleanExit && result.code === 1 && parsed.totals?.fail > 0 && reportedFailure) return 'reported-failures';
+  if (result.ok && parsed.totals?.fail === 0 && !reportedFailure) return 'passed';
+  return 'incomplete';
 }
 
 // A bounded HTTP/1.1 CONNECT + TLS request. Errors include only a stage/code;
@@ -191,11 +235,12 @@ class Doctor {
     this.options = options;
     this.emit = emit;
     this.report = { schemaVersion: 1, checkedAt: new Date().toISOString(), complete: !options.offline,
+      policy: { socketApprovals: 'host-managed-exact-paths' },
       system: { platform: process.platform, architecture: process.arch, kernel: os.release(), node: process.versions.node }, checks: [] };
   }
 
-  add(section, id, status, message, remediation) {
-    const check = { section, id, status, message, ...(remediation ? { remediation } : {}) };
+  add(section, id, status, message, remediation, details) {
+    const check = { section, id, status, message, ...(remediation ? { remediation } : {}), ...(details?.length ? { details } : {}) };
     this.report.checks.push(check);
     this.emit(check);
   }
@@ -370,18 +415,25 @@ class Doctor {
   async preflight() {
     const result = await runCommand('/bin/bash', ['-c', 'exec /bin/bash "$@" 2>&1', 'didcon-doctor-preflight',
       path.join(__dirname, 'security-preflight.sh'), ...(this.options.offline ? ['--offline'] : [])],
-      { timeout: 180000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', DIDCON_PREFLIGHT_CREDENTIAL_FIXTURE: this.options.credentialFixture ? '1' : '0' } });
+      { timeout: 180000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', DIDCON_PREFLIGHT_HOST_JSON: '1',
+        DIDCON_PREFLIGHT_CREDENTIAL_FIXTURE: this.options.credentialFixture ? '1' : '0' } });
     const parsed = preflightGroups(result.stdout);
     this.report.preflight = parsed.totals;
     for (const group of parsed.groups) {
       const status = group.fail ? 'fail' : group.warn ? 'warn' : group.pass ? 'pass' : 'skip';
       this.add('Security preflight', 'preflight.' + group.name, status,
         `${group.name}: ${group.pass} passed, ${group.fail} failed, ${group.warn} warnings`,
-        status === 'fail' || status === 'warn' ? 'Run /opt/scripts/security-preflight.sh locally for detailed checks; review output before sharing.' : undefined);
+        status === 'fail' || status === 'warn' ? group.name.startsWith('Host integrations') ?
+          'Inspect the socket paths. To accept selected exposures, run python3 .devcontainer/host/allow-sockets.py PROJECT on the host, paste the paths, and type approve. Other failures remain strict.' :
+          'Run /opt/scripts/security-preflight.sh locally for detailed checks; review output before sharing.' : undefined, group.details);
     }
-    if (!result.ok || !parsed.totals || parsed.totals.fail > 0) this.add('Security preflight', 'preflight.complete', 'fail',
-      result.timedOut ? 'Security preflight exceeded its 180-second deadline' : 'Security preflight failed or could not finish', 'Run /opt/scripts/security-preflight.sh in an ordinary container terminal after postCreateCommand completes.');
-    else this.add('Security preflight', 'preflight.complete', 'pass', `Preflight summary: ${parsed.totals.pass} passed, 0 failed, ${parsed.totals.warn} warnings`);
+    const outcome = preflightOutcome(result, parsed);
+    if (outcome === 'incomplete') {
+      this.report.complete = false;
+      this.add('Security preflight', 'preflight.complete', 'fail',
+        result.timedOut ? 'Security preflight exceeded its 180-second deadline' : 'Security preflight failed or could not finish',
+        'Run /opt/scripts/security-preflight.sh in an ordinary container terminal after postCreateCommand completes.');
+    } else if (outcome === 'passed') this.add('Security preflight', 'preflight.complete', 'pass', `Preflight summary: ${parsed.totals.pass} passed, 0 failed, ${parsed.totals.warn} warnings`);
   }
 
   async network() {
@@ -434,6 +486,7 @@ async function main(args = process.argv.slice(2)) {
   if (!options.json) console.log('didcon doctor — built-container diagnostics');
   const doctor = new Doctor(options, options.json ? undefined : check => {
     console.log(`[${check.status.toUpperCase()}] ${check.section}: ${check.message}`);
+    for (const detail of check.details || []) console.log(`  - ${detail.message}`);
     if (check.remediation && ['fail', 'warn'].includes(check.status)) console.log(`  Fix: ${check.remediation}`);
   });
   let report;
@@ -448,7 +501,7 @@ async function main(args = process.argv.slice(2)) {
   return report.summary.fail || options.strict && report.summary.warn ? 1 : 0;
 }
 
-module.exports = { parseOptions, summary, inspectProcess, finiteLimit, toolVersion, readLimits, proxyEnvironmentIssues, preflightGroups, proxyProbe, runCommand, Doctor, main };
+module.exports = { parseOptions, summary, inspectProcess, finiteLimit, toolVersion, readLimits, proxyEnvironmentIssues, preflightGroups, preflightOutcome, proxyProbe, runCommand, Doctor, main };
 if (require.main === module) {
   for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) process.on(signal, () => { children.forEach(killGroup); process.exit(code); });
   main().then(code => { process.exitCode = code; }).catch(() => { console.error('Doctor could not complete; run from an ordinary dev container terminal.'); process.exitCode = 1; });

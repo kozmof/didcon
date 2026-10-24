@@ -309,6 +309,32 @@ inside the container remain warnings. Host IDE settings, sidecar privileges,
 actual agent authentication, and the complete workflow matrix need separate
 validation. The doctor does not require access to Docker or the CA private key.
 
+If **Host integrations and mounts** fails, run
+`node /opt/scripts/host-integration-check.js` to see the individual paths; doctor
+also lists failing socket paths directly. Older reports count the same findings
+again as an overall preflight failure. Reachable editor IPC
+is a failure under the strict policy, including normal VS Code listeners. Apply
+the [host forwarding settings](.devcontainer/docs/hardening.md#host-integrations)
+in the VS Code instance that opens the container, then recreate it; container
+customizations do not replace host settings.
+On Windows/WSL, disable both `dev.containers.mountWaylandSocket` and
+`dev.containers.forwardWSLServices`. Primary WSL hosts can still supply forwarding
+services; the template also sets DISPLAY before attach to prevent automatic X11
+relay creation in Dev Containers 0.469.0. See the guide for the verified scope.
+
+To accept selected socket exposures, run on the **host**:
+
+```sh
+python3 .devcontainer/host/allow-sockets.py /path/to/project
+```
+
+Paste the selected doctor socket findings or exact paths, finish with an empty
+line, review the list, and type `approve`. Rerun doctor: approved sockets become
+warnings, and unlisted sockets still fail. `--strict` also fails on warnings.
+Approval changes need no rebuild; reconnect-created paths need fresh approval.
+Use `--list`, `--remove`, or `--clear` to manage the project approvals. See the
+[socket approval guide](.devcontainer/docs/hardening.md#approving-individual-socket-exposures).
+
 The doctor is installed by every Dockerfile variant. After applying an update
 with `patch.sh`, rebuild the container to install it and its native ABI probe.
 See the [hardening guide](.devcontainer/docs/hardening.md#container-doctor) for

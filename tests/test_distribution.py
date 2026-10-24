@@ -22,14 +22,21 @@ class DistributionTests(unittest.TestCase):
             config = root / '.devcontainer/devcontainer.json'
             before = config.read_bytes()
             self.assertEqual(json.loads(before)['service'], 'devcontainer')
+            state = json.loads((root / '.devcontainer/didcon-manifest.json').read_text())
+            self.assertEqual(state['environment']['DISPLAY'], 'disabled')
             shim = root / '.devcontainer/scripts/shims/npx'
             shim.write_text('# outdated fixture\n')
             extra = root / '.devcontainer/custom-fixture'
             extra.write_text('keep\n')
+            approvals = root / '.devcontainer/socket-allowlist.json'
+            approvals.write_text('{"version":1,"sockets":["/tmp/project-only.sock"]}\n')
+            approved = approvals.read_bytes()
+            subprocess.run(['git', '-C', str(root), 'check-ignore', '-q', str(approvals)], check=True)
             subprocess.run(['bash', str(ROOT / 'patch.sh'), str(root)], env=env, input='a\n', check=True, capture_output=True, text=True)
             self.assertEqual(before, config.read_bytes())
             self.assertIn('island run -p npm-workspace', shim.read_text())
             self.assertEqual(extra.read_text(), 'keep\n')
+            self.assertEqual(approvals.read_bytes(), approved)
             subprocess.run(['python3', str(root / '.devcontainer/host/prepare.py'), '--check', str(root)], check=True, capture_output=True)
 
     def test_volume_install_requires_a_reviewed_commit(self):
@@ -53,10 +60,12 @@ class DistributionTests(unittest.TestCase):
             shutil.copy(ROOT / 'setup.sh', source / 'setup.sh')
             shutil.copytree(ROOT / '.devcontainer', source / '.devcontainer', ignore=shutil.ignore_patterns('__pycache__'))
             subprocess.run(['python3', str(source / '.devcontainer/host/prepare.py'), '--egress', 'proxy', str(source)], check=True, capture_output=True)
+            (source / '.devcontainer/socket-allowlist.json').write_text('{"version":1,"sockets":["/tmp/source-only.sock"]}\n')
             subprocess.run(['bash', str(source / 'setup.sh'), str(target)], env=env, check=True, capture_output=True)
             state = json.loads((target / '.devcontainer/didcon-manifest.json').read_text())
             self.assertEqual(state['build']['dockerfile'], 'Dockerfile')
             self.assertEqual(state['environment']['GOTELEMETRY'], 'off')
+            self.assertFalse((target / '.devcontainer/socket-allowlist.json').exists())
             subprocess.run(['python3', str(target / '.devcontainer/host/prepare.py'), '--check', str(target)], check=True, capture_output=True)
 
 

@@ -33,6 +33,10 @@ def generate(root, state, mounts, build, environment):
     policy = {"type": "bind", "source": str(root / '.devcontainer/egress'), "target": "/policy", "read_only": True}
     proxy = f"http://{proxy_ip}:443"
     env = dict(environment)
+    # Dev Containers 0.469.0 skips automatic X11 relay creation when a nonempty
+    # DISPLAY is already configured. This is a pre-attach guard, not proof of
+    # socket isolation; the doctor still attempts actual socket connections.
+    env.setdefault("DISPLAY", "disabled")
     env.update({"DIDCON_EGRESS_MODE": "proxy", "HTTP_PROXY": proxy, "HTTPS_PROXY": proxy,
                 "http_proxy": proxy, "https_proxy": proxy, "NO_PROXY": "localhost,127.0.0.1,::1",
                 "no_proxy": "localhost,127.0.0.1,::1", "NODE_EXTRA_CA_CERTS": "/etc/didcon/trust/ca.pem",

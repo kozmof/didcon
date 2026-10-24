@@ -187,6 +187,10 @@ class PreparationTests(unittest.TestCase):
             self.verify()
 
     def test_proxy_generation_keeps_settings_and_requires_review_for_topology_changes(self):
+        # Existing installations may predate the explicit display guard.
+        config = self.config()
+        config['containerEnv'].pop('DISPLAY', None)
+        self.write_config(config)
         with contextlib.redirect_stdout(io.StringIO()):
             prepare.configure(self.root, None, 'bind', 'proxy')
         self.verify()
@@ -200,6 +204,7 @@ class PreparationTests(unittest.TestCase):
         self.assertNotIn('NET_ADMIN', client['cap_add'])
         self.assertEqual(client['network_mode'], 'service:network-guard')
         self.assertEqual(client['environment']['GOTELEMETRY'], 'off')
+        self.assertEqual(client['environment']['DISPLAY'], 'disabled')
         self.assertTrue(compose['networks']['isolated']['internal'])
         self.assertFalse(any(mount.get('source') == 'proxy-keys' for mount in client['volumes']))
         proxy = compose['services']['proxy']
@@ -210,6 +215,15 @@ class PreparationTests(unittest.TestCase):
         compose_path.write_text('{}')
         with self.assertRaisesRegex(prepare.PreparationError, 'topology changed'):
             self.verify()
+
+    def test_explicit_container_display_is_preserved(self):
+        config = self.config()
+        config['containerEnv']['DISPLAY'] = ':42'
+        self.write_config(config)
+        with contextlib.redirect_stdout(io.StringIO()):
+            prepare.configure(self.root, None, 'bind', 'proxy')
+        compose = json.loads((self.root / '.devcontainer/compose.generated.json').read_text())
+        self.assertEqual(compose['services']['devcontainer']['environment']['DISPLAY'], ':42')
 
 
 if __name__ == "__main__":

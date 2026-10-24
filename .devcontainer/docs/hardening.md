@@ -46,8 +46,14 @@ It preserves a configured build variant and rejects an unrelated
 ## Host integrations
 
 Set these in the host VS Code **user** settings, including any separate profile
-used for container work. Equivalent defaults are also included in the template,
-but extension behavior and setting scope must be checked on the installed version.
+used for container work. On Windows with WSL, open **Preferences: Open User
+Settings (JSON)** in the Windows VS Code instance that launches Dev Containers.
+Values in `customizations.vscode.settings` apply inside the opened container;
+they do not configure the parent VS Code instance before it creates the container.
+In Dev Containers 0.469.0, `mountWaylandSocket` and `forwardWSLServices` have
+application scope, while the
+three credential/Git-copy settings below have machine scope. They need host-side
+configuration even when the container template already lists the same values.
 
 ```json
 {
@@ -55,9 +61,24 @@ but extension behavior and setting scope must be checked on the installed versio
   "dev.containers.gitCredentialHelperConfigLocation": "none",
   "dev.containers.copyGitConfig": false,
   "dev.containers.mountWaylandSocket": false,
+  "dev.containers.forwardWSLServices": false,
   "remote.autoForwardPorts": false
 }
 ```
+
+Rebuild/recreate the container after applying host settings. Existing forwarded
+mounts and live socket listeners are not removed by changing settings or clearing
+environment variables in an already running container.
+
+On Windows/WSL, `mountWaylandSocket` disables the Wayland bind mount.
+`forwardWSLServices` controls the additional WSL forwarding host, but in Dev
+Containers 0.469.0 it does not exclude services from a primary CLI host that is
+already WSL. X11 forwarding can therefore remain with both settings disabled.
+The template and proxy Compose generator set `DISPLAY=disabled` before attach:
+the inspected extension skips creating its automatic X11 relay when the
+container already has a nonempty DISPLAY. An explicit project DISPLAY value is
+preserved. This prevents relay creation in that extension version; doctor still
+checks actual sockets. Recreate after regenerating the Compose configuration.
 
 Disable SSH/GPG agent and display forwarding separately using the controls
 available on the host, Remote SSH, WSL, and installed Dev Containers extension.
@@ -83,6 +104,76 @@ You can probe another known path without sending protocol commands:
 node /opt/scripts/host-integration-check.js --socket /path/to/socket
 ```
 
+Doctor includes failed socket paths directly under **Host integrations and
+mounts** and in its JSON report. Older versions also display a separate overall
+preflight failure for the same findings; current reports avoid that duplicate.
+An additional overall failure means the preflight was incomplete or its exit
+could not be explained by reported findings. Run the focused command above
+without `--socket` for the complete local check, or add `--json` for structured
+output. Credential-helper values and raw child error output remain suppressed.
+An attached IDE can leave `vscode-ipc-*` and `vscode-remote-containers-ipc-*`
+listeners even when workspace protection and egress checks pass. A successful
+connection is reported conservatively; it does not prove that credentials were
+retrieved or that the endpoint has a particular host capability. The strict
+policy does not silently allow editor IPC in order to produce a passing result.
+
+`vscode-git-*` sockets belong to VS Code's Git integration. Settings such as
+`git.terminalAuthentication: false` and `git.useIntegratedAskPass: false` reduce
+automatic askpass environment injection, but do not guarantee that the socket
+listener is removed. Disable the built-in Git extension in the container if that
+integration is unnecessary, reload, and verify the actual connection result.
+Core editor IPC may remain while VS Code is attached; complete socket isolation
+requires a workflow without those editor integrations.
+
+### Approving individual socket exposures
+
+To retain selected integrations, first run `didcon-doctor` and review the failed
+socket paths. On the **host**, run this from the didcon checkout or use the
+script installed in the target project:
+
+```sh
+python3 .devcontainer/host/allow-sockets.py /path/to/project
+```
+
+Paste the selected doctor finding lines or absolute socket paths, one per line.
+For example, these are accepted input formats:
+
+```text
+- Socket reachable or isolation unverified: "/tmp/vscode-ipc-example.sock"
+/tmp/.X11-unix/X0
+```
+
+Finish with an empty line, review the exact paths shown, then type `approve` to
+save. Any other answer cancels. Rerun `didcon-doctor` in the container. Approved
+reachable sockets appear as **WARN**; unlisted sockets still **FAIL**.
+`didcon-doctor --strict` continues to return a failure for warnings. There is no
+blanket IDE exception and no wildcard matching. UUID paths recreated on reconnect
+need fresh approval. Display and agent sockets can also be accepted explicitly;
+review the service they expose before approving them.
+
+Manage approvals on the host:
+
+```sh
+python3 .devcontainer/host/allow-sockets.py /path/to/project --list
+python3 .devcontainer/host/allow-sockets.py /path/to/project --remove
+python3 .devcontainer/host/allow-sockets.py /path/to/project --clear
+```
+
+Removal accepts pasted paths and asks for the same confirmation. Clear asks for
+confirmation before revoking all entries. The project-local
+`.devcontainer/socket-allowlist.json` is ignored by Git, excluded from image build
+contexts, preserved by `patch.sh`, and discarded when `setup.sh` copies a source
+checkout into a fresh project. It is read through the existing read-only host
+control mount, so approval changes need no rebuild. Installing this feature in
+an existing image requires one normal rebuild after patching.
+
+Approval records acceptance of a reachable endpoint. Socket permissions and
+exposure remain unchanged, and pathname approval does not authenticate the
+process listening there. Doctor still attempts each approved connection, even
+outside its discovery scan. Invalid, symlinked, hardlinked, or writable-mounted
+approval files fail verification. Socket approvals cannot waive mount,
+container-engine socket, credential-helper, or disposable-credential failures.
+
 ## Container doctor
 
 Every image variant installs `didcon-doctor` (also `/opt/scripts/doctor.sh`). Run
@@ -103,7 +194,8 @@ cgroup memory/CPU/process limits, storage space/inodes, and small writable-path
 probes that are removed immediately. It reuses the security preflight's profile,
 shim, registry, mount, known-socket, credential-configuration, and egress checks.
 Commands have output limits and deadlines; reports summarize child output rather
-than copying it, and do not dump environment or credential values.
+than copying it, and do not dump environment contents or credential values.
+Known failing socket paths are included as diagnostic metadata.
 
 A small static helper queries the kernel's actual Landlock ABI using
 [`landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)`](https://docs.kernel.org/userspace-api/landlock.html#landlock-abi-versions).

@@ -180,6 +180,125 @@ Evidence logs: `/tmp/didcon-doctor-build.log` and
 coverage, sidecar privileges, and authenticated agent workflows remain separate
 validation tasks.
 
+## First attached-IDE checks (2026-10-24)
+
+The user's bind-mode test built successfully in VS Code `1.142.0` with Dev
+Containers `0.469.0`. The live container passed protected workspace/control
+mounts, dependency mounts, bounded scratch, tool/sandbox checks, and proxy TLS
+enforcement. Its failed doctor group came from reachable integration sockets,
+not volume or proxy configuration. The original focused check found X11, Git
+askpass, and four VS Code IPC paths; the group also counted the preflight's
+aggregate host-integration failure. The separate overall doctor failure
+summarized the same underlying findings.
+
+Inspection found an additional live Wayland socket bind mount. Directory
+enumeration described its underlying regular-file placeholder while `stat`
+identified the mounted socket. Discovery now checks matching mounted objects
+rather than trusting the directory-entry file type. A regression test covers
+this mismatch; the 13 Node tests pass. Running the updated checker from stdin
+inside the attached container also detected the Wayland mount and its alias.
+No display, credential, or editor protocol requests were sent.
+
+The installed extension metadata confirms application scope for
+`dev.containers.mountWaylandSocket` and machine scope for credential/Git-copy
+controls. The relevant Windows VS Code user settings were unset. With explicit
+user approval, the five documented host restrictions were applied while
+preserving unrelated settings. Their effect after container recreation remains
+to be checked. Existing socket listeners remain accessible until their services
+or containers are recreated/stopped; strict core-IDE IPC findings are retained.
+
+Doctor remediation now names the focused check and explains the related overall
+failure. The two updated diagnostic scripts were also copied to the test
+project after verifying they had no local changes; its host manifest check
+still passes. Rebuilding is required to install them under `/opt/scripts`.
+Real credential unavailability, disabled display forwarding after
+recreation, core IDE IPC isolation, and reconnect behavior remain unverified.
+
+## Rebuild follow-up: separate WSL forwarding control (2026-10-24)
+
+After recreation, inspection confirmed that the Wayland bind mount was removed.
+The initial follow-up identified the separate application-scoped
+`dev.containers.forwardWSLServices` setting and set it to false under the approved
+host restrictions. Further inspection corrected the assumption that this alone
+turns off X11 forwarding: in Dev Containers 0.469.0, the primary CLI host is
+always included among forwarding sources, even when it is WSL. The setting only
+excludes an additional WSL forwarding host.
+
+The inspected extension skips automatic X11 relay creation when the container
+already has a nonempty DISPLAY. The template and proxy Compose generator now
+default DISPLAY to `disabled`, preserving explicit project overrides. The actual
+installed relay-creation fragment was exercised with stub hosts: it selected
+`/tmp/.X11-unix/X0` with no DISPLAY and created no relay with `DISPLAY=disabled`.
+This checks the extension's startup decision, not live socket denial after
+recreation. Doctor continues attempting actual connections; clearing environment
+variables after attach does not remove an existing listener.
+
+The remaining live findings were X11, Git askpass, and four editor/control IPC
+paths. Doctor now consumes structured findings from the focused host check and
+includes socket paths directly in text/JSON reports. Raw helper messages and
+credential values remain suppressed. A normal failing preflight is no longer
+counted again as a second doctor failure; timeouts, missing summaries, truncated
+output, and unexplained exit failures still receive an overall failure.
+
+Sixteen Node tests and 19 Python tests pass, including structured-finding
+redaction and the distinction between reported failures and incomplete runs.
+The updated focused checker also reproduced the remaining live socket findings
+in structured mode without modifying the container or sending protocol requests.
+The strict editor-IPC policy remains unchanged; a cache-free build cannot remove
+listeners created by an attached editor.
+
+All 16 diagnostic Node tests also pass in the user's running container runtime.
+The mount fixture now includes the proxy trust mount and explicitly tests its
+read-only requirement, so these tests work when `DIDCON_EGRESS_MODE=proxy` is
+inherited. The three updated diagnostic scripts were copied to `didcon-test`
+after checking them against the rebuilt image; host manifest validation passes.
+They will be installed under `/opt/scripts` on its next ordinary cached rebuild.
+
+The final packaged workflow passed with
+`didcon-hardening-test:host-diagnostics`, built by layering the updated scripts
+onto the previously tested Node doctor image. It verified all 60 production
+preflight checks, live TLS enforcement, offline/strict modes, safe credential
+details, and exactly one failed doctor check for the exposed dummy fixture.
+Logs: `/tmp/didcon-host-diagnostics-build.log` and
+`/tmp/didcon-host-diagnostics-workflows.log`. The active attached test container
+was not restarted or modified by these fixture runs.
+
+## Exact socket approval workflow (2026-10-24)
+
+The broad IDE-mode proposal was replaced with host-managed, exact-path socket
+approvals. The host tool accepts copied doctor findings, displays the proposed
+changes, and requires typing `approve`. Cancellation and EOF leave the policy
+unchanged. Approved reachable paths remain warnings; all other checks retain
+their normal failure behavior. The policy is local to each project, excluded
+from image contexts and fresh setup copies, and preserved by patching.
+
+All 22 Node tests and 25 Python tests pass. They cover structured diagnostics,
+redaction, mounted-socket discovery, strict defaults, literal matching, both
+control-mount locations, writable shadow mounts, invalid/aliased policies,
+confirmation, listing/revocation, concurrent changes, and distribution behavior.
+
+The final packaged workflow passed using
+`didcon-hardening-test:socket-approvals`. Its baseline still passes all 60
+production preflight checks, TLS enforcement, package/agent CLI workflows, and
+credential-fixture checks. Three harmless socket listeners then verified:
+
+- Default failure and approval of only one selected editor path, leaving the
+  unlisted display path failing.
+- Explicit approval of display and outside-scan paths, with actual connections
+  still attempted and accepted exposure reported as warnings in doctor and
+  standalone preflight summaries.
+- Strict-mode failure for warnings, denial of policy writes from the container,
+  and continued failure for host-connected credential-helper configuration.
+- Invalid policy rejection and restored socket failures after confirmed
+  revocation, without rebuilding or restarting the fixture container.
+
+Logs: `/tmp/didcon-socket-approvals-build.log` and
+`/tmp/didcon-socket-approvals-workflows.log`. The run removed its disposable
+containers, networks, and volumes. None of the user's sample socket paths were
+approved, and the attached project was not restarted. Actual display-relay
+prevention and socket behavior after a fresh IDE attachment/reconnect remain
+to be verified. Accepted exposure does not complete the socket-isolation task.
+
 ## Remaining work
 
 1. Extend the passing Node workflow checks to Go, Rust, Zig, Blender/uv, actual

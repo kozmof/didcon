@@ -40,6 +40,30 @@ reports this host's actual Landlock ABI 3; doctor preserves warnings for reduced
 profile support, pathname sockets, and unverified host quotas. Non-Node images,
 real IDE integrations, and authenticated agent workflows remain open.
 
+**First IDE attach:** the bind-mode test builds and its protected mounts and
+proxy checks pass in VS Code 1.142.0 / Dev Containers 0.469.0. The remaining doctor
+failures are reachable X11/Git/editor sockets. A mounted-Wayland detection bug
+was fixed and reproduced against the attached container. The user approved the
+host forwarding restrictions; verify them after recreation/reconnect. Core IDE
+IPC remains a strict failure, so host-integration isolation is not marked complete.
+
+**Rebuild follow-up:** the Wayland mount is now absent. Disabling
+`dev.containers.forwardWSLServices` does not suppress the primary WSL host's X11
+relay in the inspected 0.469.0 extension. The template and Compose generator now
+set DISPLAY before attach to prevent creation of that automatic relay. Verify
+actual socket denial after recreation/reconnect. Doctor shows failing paths and
+avoids counting reported findings as another overall failure.
+
+**Explicit socket approvals:** the host approval tool accepts pasted doctor
+findings, shows the exact paths, and requires typing `approve`. Approved exposure
+remains a warning; unlisted paths and non-socket security failures remain strict.
+Project approvals are excluded from distribution/builds and preserved by patching.
+This is diagnostic risk acceptance; the host-integration isolation task remains
+open until actual denial is verified.
+All 22 Node and 25 Python tests pass, along with the packaged Docker workflow
+and live socket approval/revocation fixtures. No sample paths were approved in
+the user's project.
+
 ## Preparation
 
 - [ ] Record the supported host environments, Docker and Dev Containers versions, kernel/Landlock capabilities, and image variants to validate.
@@ -76,6 +100,7 @@ Plan: [Phase 1](harden-1.md#phase-1-host-integration-and-targeted-protection).
 - [x] Confirm ordinary Git add/commit operations and supported submodule/worktree operations still work.
 - [ ] Confirm disposable host credentials and unnecessary forwarded sockets are inaccessible from both sandboxed agents and an ordinary container terminal after initial attach and reconnect.
 - [x] Confirm checks exercise connection attempts to known socket paths; hiding environment variables or directory listings alone does not count as denial.
+- [x] Add host-confirmed exact socket approvals with pasted findings, warning visibility, revocation, read-only policy protection, and disposable runtime verification. Unlisted sockets and non-socket failures retain their normal failure behavior.
 - [ ] Confirm automatic port forwarding stays disabled and explicitly requested forwarding still works.
 - [ ] Confirm VS Code, agents, safe-chain, package installs, and sandboxed app/test launches work with the tmpfs and dependency volumes.
 - [x] Confirm `npx` uses its shim and launched child processes inherit the intended restrictions.

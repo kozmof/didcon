@@ -82,7 +82,7 @@ apply_all=0
 while IFS= read -r -d '' src_file; do
   rel="${src_file#"$SRC"/}"
   # Project-local generated state must never be copied from the template repo.
-  case "$rel" in didcon-manifest.json|seed.bundle|compose.generated.json|*/__pycache__/*) continue ;; esac
+  case "$rel" in didcon-manifest.json|seed.bundle|compose.generated.json|socket-allowlist.json|*/__pycache__/*) continue ;; esac
   dst_file="$DST/$rel"
 
   if [ "$rel" = devcontainer.json ] && [ -f "$DST/didcon-manifest.json" ]; then
@@ -153,7 +153,7 @@ done < <(find "$SRC" -type f -print0 | sort -z)
 extra=0
 while IFS= read -r -d '' dst_file; do
   rel="${dst_file#"$DST"/}"
-  case "$rel" in didcon-manifest.json|seed.bundle|compose.generated.json|*/__pycache__/*) continue ;; esac
+  case "$rel" in didcon-manifest.json|seed.bundle|compose.generated.json|socket-allowlist.json|*/__pycache__/*) continue ;; esac
   if [ ! -f "$SRC/$rel" ]; then
     if [ "$extra" -eq 0 ]; then
       echo

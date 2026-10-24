@@ -5,7 +5,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const { parseOptions, inspectProcess, readLimits, finiteLimit, toolVersion, proxyEnvironmentIssues,
-  preflightGroups, runCommand, Doctor } = require('../.devcontainer/scripts/doctor.js');
+  preflightGroups, preflightOutcome, runCommand, Doctor } = require('../.devcontainer/scripts/doctor.js');
 
 test('capability checks distinguish effective permissions from the startup bounding set', () => {
   const status = 'NoNewPrivs:\t1\nSeccomp:\t2\nCapEff:\t0000000000000000\nCapBnd:\t00000000000000c1\n';
@@ -58,6 +58,52 @@ test('preflight aggregation reports known groups and excludes child messages and
   assert.equal(parsed.groups[1].warn, 1);
   assert.ok(!JSON.stringify(parsed).includes('dummy-secret'));
   assert.equal(preflightGroups('child failed without summary').totals, null);
+});
+
+test('structured host findings expose socket paths while suppressing credential messages and extra fields', () => {
+  const host = { kind: 'didcon-host-integration', schemaVersion: 1, checks: [
+    { status: 'pass', message: 'mounts pass' },
+    { status: 'fail', type: 'socket', socket: '/tmp/vscode-ipc-fixture.sock', message: 'dummy-secret', password: 'dummy-secret' },
+    { status: 'fail', type: 'credential-fixture', message: 'dummy-secret', password: 'dummy-secret' },
+    { status: 'fail', type: '__proto__', message: 'dummy-secret' },
+  ] };
+  const output = '==> Host integrations and mounts (repeat after attach/reconnect)\n' + JSON.stringify(host) +
+    '\n[FAIL] host integration or mount exposure detected; see checks above\n==> Summary: 58 passed, 1 failed, 0 warnings\n';
+  const parsed = preflightGroups(output);
+  assert.equal(parsed.groups[0].fail, 3);
+  assert.equal(parsed.groups[0].pass, 1);
+  assert.ok(parsed.groups[0].details.some(detail => detail.socket === '/tmp/vscode-ipc-fixture.sock'));
+  assert.equal(parsed.groups[0].details[1].message, 'Disposable credential fixture is exposed or unverified');
+  assert.equal(parsed.groups[0].details[2].type, 'unknown');
+  assert.ok(!JSON.stringify(parsed).includes('dummy-secret'));
+});
+
+test('socket approvals retain warning status and the explicit accepted-exposure label', () => {
+  const doctor = new Doctor(parseOptions([]));
+  assert.equal(doctor.report.policy.socketApprovals, 'host-managed-exact-paths');
+  assert.throws(() => parseOptions(['--ide-mode']));
+  const host = { kind: 'didcon-host-integration', schemaVersion: 1, checks: [
+    { status: 'warn', type: 'socket', socket: '/tmp/vscode-ipc-fixture.sock', accepted: 'socket-allowlist', message: 'dummy-secret' },
+  ] };
+  const parsed = preflightGroups('==> Host integrations and mounts (repeat after attach/reconnect)\n' + JSON.stringify(host) +
+    '\n[WARN] host integration checks include approved socket exposures; see checks above\n==> Summary: 59 passed, 0 failed, 1 warnings\n');
+  assert.equal(parsed.groups[0].fail, 0);
+  assert.equal(parsed.groups[0].warn, 1);
+  assert.equal(parsed.groups[0].details[0].accepted, 'socket-allowlist');
+  assert.equal(parsed.totals.warn, 1);
+  assert.ok(!JSON.stringify(parsed).includes('dummy-secret'));
+});
+
+test('reported failures remain failures without duplicating the aggregate; incomplete runs are distinct', () => {
+  const parsed = { groups: [{ fail: 1 }], totals: { pass: 58, fail: 1, warn: 0 } };
+  const failure = { code: 1, ok: false };
+  assert.equal(preflightOutcome(failure, parsed), 'reported-failures');
+  assert.equal(preflightOutcome({ ...failure, timedOut: true }, parsed), 'incomplete');
+  assert.equal(preflightOutcome({ ...failure, overflow: true }, parsed), 'incomplete');
+  assert.equal(preflightOutcome({ ...failure, signal: 'SIGKILL' }, parsed), 'incomplete');
+  assert.equal(preflightOutcome(failure, { groups: [], totals: null }), 'incomplete');
+  assert.equal(preflightOutcome(failure, { groups: [], totals: parsed.totals }), 'incomplete');
+  assert.equal(preflightOutcome({ code: 0, ok: true }, { groups: [{ fail: 0 }], totals: { pass: 60, fail: 0, warn: 0 } }), 'passed');
 });
 
 test('tool inventory extracts complete Node and Go versions without copying raw output', () => {

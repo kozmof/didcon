@@ -62,10 +62,13 @@
         "-openai.chatgpt"
       ],
       "settings": {
+        // Also set these forwarding controls in the host VS Code user settings.
+        // Container customizations cannot prevent parent-side creation of mounts.
         "dev.containers.dockerCredentialHelper": false,
         "dev.containers.gitCredentialHelperConfigLocation": "none",
         "dev.containers.copyGitConfig": false,
         "dev.containers.mountWaylandSocket": false,
+        "dev.containers.forwardWSLServices": false,
         "remote.autoForwardPorts": false,
         "workbench.colorCustomizations": {
           "titleBar.activeBackground": "#009e15",
@@ -76,6 +79,8 @@
     }
   },
   "containerEnv": {
+    // Suppress automatic X11 relay creation before IDE attachment. Empty is insufficient.
+    "DISPLAY": "disabled",
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "GOTELEMETRY": "off"
   },

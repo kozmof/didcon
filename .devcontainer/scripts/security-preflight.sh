@@ -634,14 +634,36 @@ check_island
 
 echo ""
 echo "==> Host integrations and mounts (repeat after attach/reconnect)"
-integration_args=()
+integration_args=(--json)
 if [[ "${DIDCON_PREFLIGHT_CREDENTIAL_FIXTURE:-0}" == 1 ]]; then
     integration_args+=(--credential-fixture)
 fi
-if node /opt/scripts/host-integration-check.js "${integration_args[@]}"; then
-    pass "host integration and mount checks"
-else
+integration_status=0
+integration_output=$(node /opt/scripts/host-integration-check.js "${integration_args[@]}") || integration_status=$?
+# Render the same structured result once and preserve accepted-exposure warnings
+# in the preflight summary. Never run the socket/credential probes a second time.
+if ! integration_warns=$(printf '%s\n' "$integration_output" | node -e '
+    try {
+        const report = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+        if (report.kind !== "didcon-host-integration" || report.schemaVersion !== 1 || !Array.isArray(report.checks)) throw new Error();
+        if (process.env.DIDCON_PREFLIGHT_HOST_JSON === "1") console.error(JSON.stringify(report));
+        else for (const check of report.checks) console.error(`[${check.status.toUpperCase()}] ${check.message}`);
+        console.log(report.checks.filter(check => check.status === "warn").length);
+    } catch {
+        console.error("[FAIL] host integration report could not be read");
+        process.exitCode = 1;
+    }
+'); then
+    integration_status=1
+    integration_warns=0
+fi
+if [[ "$integration_warns" -gt 0 ]]; then
+    warn "host integration checks include approved socket exposures; see checks above"
+fi
+if [[ "$integration_status" -ne 0 ]]; then
     fail "host integration or mount exposure detected; see checks above"
+elif [[ "$integration_warns" -eq 0 ]]; then
+    pass "host integration and mount checks"
 fi
 
 echo ""

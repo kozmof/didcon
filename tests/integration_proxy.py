@@ -27,7 +27,7 @@ def main():
         env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
         subprocess.run(['git', 'init', '-q', str(root)], env=env, check=True)
         shutil.copytree(ROOT / '.devcontainer', root / '.devcontainer',
-                        ignore=shutil.ignore_patterns('__pycache__', 'didcon-manifest.json', 'seed.bundle', 'compose.generated.json'))
+                        ignore=shutil.ignore_patterns('__pycache__', 'didcon-manifest.json', 'seed.bundle', 'compose.generated.json', 'socket-allowlist.json'))
         with contextlib.redirect_stdout(io.StringIO()):
             prepare.configure(root, None, 'bind', 'proxy')
         compose_path = root / '.devcontainer/compose.generated.json'
@@ -58,6 +58,33 @@ def main():
             compose('up', '-d', '--no-build', '--wait', '--wait-timeout', '90')
             if args.workflows:
                 compose('exec', '-T', '--user', 'dev', 'devcontainer', '/bin/bash', '/tests/integration_workflows.sh')
+                socket_test = ['exec', '-T', '--user', 'dev', 'devcontainer', 'node', '/tests/integration_socket_approvals.js']
+                compose('exec', '-T', '-d', '--user', 'dev', 'devcontainer', 'node', '/tests/integration_socket_approvals.js', 'serve')
+                for _ in range(30):
+                    ready = subprocess.run(command + socket_test + ['ready'], text=True, capture_output=True)
+                    if ready.returncode == 0:
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise AssertionError('Socket approval fixture did not start')
+                compose(*socket_test, 'initial')
+
+                def approve(text, *arguments):
+                    result = subprocess.run(['python3', str(ROOT / '.devcontainer/host/allow-sockets.py'), str(root), *arguments],
+                                            input=text, env=env, capture_output=True, text=True)
+                    if result.returncode:
+                        raise AssertionError('Host socket approval failed: ' + result.stderr)
+
+                approve('- Socket reachable or isolation unverified: "/tmp/vscode-ipc-didcon-approval.sock"\n\napprove\n')
+                compose(*socket_test, 'editor')
+                approve('/tmp/wayland-didcon-approval.sock\n/tmp/didcon/plain-approval.sock\n\napprove\n')
+                compose(*socket_test, 'all')
+                policy = root / '.devcontainer/socket-allowlist.json'
+                policy.write_text('{"version":1,"sockets":["/tmp/*"]}\n')
+                compose(*socket_test, 'invalid')
+                policy.write_text('{"version":1,"sockets":["/tmp/vscode-ipc-didcon-approval.sock"]}\n')
+                approve('approve\n', '--clear')
+                compose(*socket_test, 'revoked')
                 compose('exec', '-T', '--user', '0', 'devcontainer', 'node', '/tests/integration_doctor.js')
                 return
             compose('exec', '-T', '--user', 'dev', 'devcontainer', 'node', '/tests/integration_proxy_client.js')

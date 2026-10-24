@@ -158,6 +158,7 @@ fi
 rm -f "$TARGET_DIR/.devcontainer/didcon-manifest.json"
 rm -f "$TARGET_DIR/.devcontainer/seed.bundle"
 rm -f "$TARGET_DIR/.devcontainer/compose.generated.json"
+rm -f "$TARGET_DIR/.devcontainer/socket-allowlist.json"
 
 JSON="$TARGET_DIR/.devcontainer/devcontainer.json"
 TMP_JSON="$(mktemp)"

@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
+const { loadSocketAllowlist } = require('./socket-allowlist.js');
 
 function parseMounts(text) {
   const decode = value => value.replace(/\\([0-7]{3})/g, (_, code) => String.fromCharCode(parseInt(code, 8)));
@@ -58,23 +59,29 @@ function probeSocket(filename) {
   });
 }
 
-function integrationSockets() {
+function integrationSockets(options = {}) {
+  const environment = options.env || process.env;
+  const filesystem = options.fs || fs;
   const sockets = new Set(['SSH_AUTH_SOCK', 'VSCODE_IPC_HOOK_CLI', 'REMOTE_CONTAINERS_IPC', 'GPG_AGENT_SOCK']
-    .map(key => process.env[key]).filter(Boolean));
+    .map(key => environment[key]).filter(Boolean));
   let remaining = 2000;
   function scan(directory, depth, inherited = false) {
     let entries;
-    try { entries = fs.readdirSync(directory, { withFileTypes: true }); } catch { return; }
+    try { entries = filesystem.readdirSync(directory, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
       if (--remaining < 0) return;
       const candidate = path.join(directory, entry.name);
       const match = inherited || /vscode|remote-containers|ssh-|gpg|[.]X11-unix|wayland/i.test(entry.name);
-      if (entry.isSocket() && match) sockets.add(candidate);
+      if (match) {
+        // getdents() can describe the regular placeholder beneath a bind-mounted
+        // socket. Resolve the mounted object instead of trusting Dirent alone.
+        try { if (entry.isSocket() || filesystem.statSync(candidate).isSocket()) sockets.add(candidate); } catch {}
+      }
       if (entry.isDirectory() && depth > 0) scan(candidate, depth - 1, match);
     }
   }
   scan('/tmp', 2);
-  if (process.env.XDG_RUNTIME_DIR) scan(process.env.XDG_RUNTIME_DIR, 1);
+  if (environment.XDG_RUNTIME_DIR) scan(environment.XDG_RUNTIME_DIR, 1);
   scan('/home/dev/.gnupg', 1, true);
   return sockets;
 }
@@ -99,16 +106,35 @@ function probeCredentialFixture(options = {}) {
   return { exposed: true, reason: 'unexpected credential fixture result; isolation unverified' };
 }
 
-async function main() {
+async function main(args = process.argv.slice(2)) {
+  let json = false, credentialFixture = false;
+  const extraSockets = [];
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === '--json') { json = true; continue; }
+    if (args[index] === '--credential-fixture') { credentialFixture = true; continue; }
+    if (args[index] !== '--socket' || !args[index + 1]) throw new Error('Usage: host-integration-check.js [--json] [--socket PATH] [--credential-fixture]');
+    extraSockets.push(args[++index]);
+  }
   let failed = false;
-  const fail = message => { failed = true; console.error(`[FAIL] ${message}`); };
+  const checks = [];
+  const emit = (status, message, fields = {}) => {
+    checks.push({ status, message, ...fields });
+    if (!json) (status === 'fail' ? console.error : console.log)(`[${status.toUpperCase()}] ${message}`);
+  };
+  const fail = (message, fields) => { failed = true; emit('fail', message, fields); };
+  const pass = message => emit('pass', message);
+  let acceptedSockets = 0;
+  let approvals = new Set();
   try {
     const manifest = JSON.parse(fs.readFileSync('/etc/didcon/manifest.json', 'utf8'));
-    const failures = checkMounts(manifest, parseMounts(fs.readFileSync('/proc/self/mountinfo', 'utf8')));
-    failures.forEach(fail);
-    if (!failures.length) console.log('[PASS] protected mounts, dependency mounts, and bounded /tmp');
+    const mounts = parseMounts(fs.readFileSync('/proc/self/mountinfo', 'utf8'));
+    const failures = checkMounts(manifest, mounts);
+    failures.forEach(message => fail(message, { type: 'mount' }));
+    if (!failures.length) pass('protected mounts, dependency mounts, and bounded /tmp');
+    try { approvals = loadSocketAllowlist(manifest, mounts); }
+    catch { fail('socket approval file is invalid, aliased, or not protected by the host control mount', { type: 'socket-policy' }); }
   } catch (error) {
-    fail(`mount preparation cannot be verified: ${error.code || error.name}`);
+    fail(`mount preparation cannot be verified: ${error.code || error.name}`, { type: 'mount' });
   }
   try {
     const root = fs.lstatSync('/tmp/didcon');
@@ -117,39 +143,44 @@ async function main() {
     }
     const scratch = fs.mkdtempSync('/tmp/didcon/preflight-');
     fs.rmdirSync(scratch);
-    console.log('[PASS] bounded shared scratch is writable with private directory permissions');
+    pass('bounded shared scratch is writable with private directory permissions');
   } catch {
-    fail('shared scratch directory is missing, unsafe, or not writable; run preflight as dev');
+    fail('shared scratch directory is missing, unsafe, or not writable; run preflight as dev', { type: 'scratch' });
   }
   // Default checks only read helper configuration. A separate opt-in fixture
   // check below may invoke a deliberately configured disposable helper.
   try {
     const helpers = execFileSync('/usr/bin/git', ['config', '--get-regexp', '^credential(\\..*)?\\.helper$'],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
-    if (/vscode|remote-containers|git-credential-manager/i.test(helpers)) fail('review host-connected Git credential helper configuration');
+    if (/vscode|remote-containers|git-credential-manager/i.test(helpers)) fail('review host-connected Git credential helper configuration', { type: 'credential-config' });
   } catch (error) {
-    if (error.status !== 1) fail('cannot inspect credential-helper configuration');
+    if (error.status !== 1) fail('cannot inspect credential-helper configuration', { type: 'credential-config' });
   }
   const sockets = integrationSockets();
-  let credentialFixture = false;
-  for (let index = 2; index < process.argv.length; index++) {
-    if (process.argv[index] === '--credential-fixture') { credentialFixture = true; continue; }
-    if (process.argv[index] !== '--socket' || !process.argv[index + 1]) throw new Error('Usage: host-integration-check.js [--socket PATH] [--credential-fixture]');
-    sockets.add(process.argv[++index]);
-  }
+  extraSockets.forEach(filename => sockets.add(filename));
+  // Continue probing approved paths even if they are no longer in the bounded
+  // discovery scan. Approval accepts exposure; it never skips a connection test.
+  approvals.forEach(filename => sockets.add(filename));
   if (credentialFixture) {
     const result = probeCredentialFixture();
-    if (result.exposed) fail(result.reason);
-    else console.log('[PASS] disposable credential fixture unavailable (credential values suppressed)');
+    if (result.exposed) fail(result.reason, { type: 'credential-fixture' });
+    else pass('disposable credential fixture unavailable (credential values suppressed)');
   }
   for (const filename of sockets) {
     const result = await probeSocket(filename);
-    if (result.exposed) fail(`integration socket reachable or unverified (${result.reason}): ${filename}`);
+    if (result.exposed) {
+      if (approvals.has(filename)) {
+        acceptedSockets++;
+        emit('warn', `Approved socket exposure (${result.reason}): ${filename}`,
+          { type: 'socket', socket: filename, accepted: 'socket-allowlist' });
+      } else fail(`integration socket reachable or unverified (${result.reason}): ${filename}`, { type: 'socket', socket: filename });
+    }
   }
-  if (!sockets.size) console.log('[PASS] no known integration socket paths found; repeat after attach/reconnect');
-  else if (!failed) console.log('[PASS] known integration socket connection attempts denied or services unavailable');
+  if (!sockets.size) pass('no known integration socket paths found; repeat after attach/reconnect');
+  else if (!failed && !acceptedSockets) pass('known integration socket connection attempts denied or services unavailable');
+  if (json) console.log(JSON.stringify({ kind: 'didcon-host-integration', schemaVersion: 1, checks }));
   process.exitCode = failed ? 1 : 0;
 }
 
-module.exports = { parseMounts, checkMounts, probeSocket, probeCredentialFixture };
+module.exports = { parseMounts, checkMounts, probeSocket, probeCredentialFixture, integrationSockets };
 if (require.main === module) main().catch(() => { console.error('[FAIL] host integration check could not complete'); process.exitCode = 1; });
