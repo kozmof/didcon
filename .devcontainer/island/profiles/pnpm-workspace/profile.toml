@@ -23,3 +23,8 @@ literal = "/home/dev/.config"
 [[env]]
 name = "XDG_DATA_HOME"
 literal = "/workspace/.pnpm-data"
+
+# Shared bounded scratch is accessible to parent and nested tool policies.
+[[env]]
+name = "TMPDIR"
+literal = "/tmp/didcon"

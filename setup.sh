@@ -48,6 +48,15 @@ if [ -e "$TARGET_DIR/.devcontainer" ]; then
   exit 1
 fi
 
+if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))'; then
+  echo "Error: Python 3.9+ is required on the host to prepare protected mounts." >&2
+  exit 1
+fi
+if ! command -v git >/dev/null 2>&1; then
+  echo "Error: Git is required on the host to prepare protected mounts." >&2
+  exit 1
+fi
+
 # Prompts must read from the terminal, not from any piped stdin. With no
 # controlling terminal there is nobody to answer, so take the defaults.
 if { : <>/dev/tty; } 2>/dev/null; then
@@ -59,6 +68,10 @@ fi
 
 VARIANT_PATH=""
 VARIANT_CONTEXT=""
+WORKSPACE_MODE="${DIDCON_WORKSPACE_MODE:-bind}"
+EGRESS_MODE="${DIDCON_EGRESS_MODE:-proxy}"
+case "$WORKSPACE_MODE" in bind|volume) ;; *) echo "Error: DIDCON_WORKSPACE_MODE must be bind or volume." >&2; exit 1 ;; esac
+case "$EGRESS_MODE" in firewall|proxy) ;; *) echo "Error: DIDCON_EGRESS_MODE must be firewall or proxy." >&2; exit 1 ;; esac
 
 set_variant() {
   # $1 = menu number. Sets VARIANT_PATH/VARIANT_CONTEXT, or returns 1.
@@ -127,7 +140,24 @@ if [ -n "$TTY" ]; then
   done
 fi
 
+if [ -n "$TTY" ]; then
+  echo "Workspace: bind shares the trusted host checkout; volume exports reviewed Git objects."
+  while true; do
+    printf 'Workspace mode [%s] (bind / volume): ' "$WORKSPACE_MODE"
+    IFS= read -r reply <"$TTY" || reply=""
+    [ -n "$reply" ] || reply="$WORKSPACE_MODE"
+    case "$reply" in bind|volume) WORKSPACE_MODE="$reply"; break ;; *) echo "  Please answer bind or volume." ;; esac
+  done
+fi
+
 cp -r "$SCRIPT_DIR/.devcontainer" "$TARGET_DIR/.devcontainer"
+# A prepared source checkout may contain project-specific generated state.
+if [ -f "$TARGET_DIR/.devcontainer/didcon-manifest.json" ]; then
+  python3 "$TARGET_DIR/.devcontainer/host/prepare.py" --restore-template "$TARGET_DIR"
+fi
+rm -f "$TARGET_DIR/.devcontainer/didcon-manifest.json"
+rm -f "$TARGET_DIR/.devcontainer/seed.bundle"
+rm -f "$TARGET_DIR/.devcontainer/compose.generated.json"
 
 JSON="$TARGET_DIR/.devcontainer/devcontainer.json"
 TMP_JSON="$(mktemp)"
@@ -165,8 +195,12 @@ fi
 
 cat "$TMP_JSON" >"$JSON"
 
+python3 "$TARGET_DIR/.devcontainer/host/prepare.py" --mode "$WORKSPACE_MODE" --egress "$EGRESS_MODE" "$TARGET_DIR"
+
 echo "Placed .devcontainer at $TARGET_DIR/.devcontainer"
 echo "  name:       $NAME"
 echo "  dockerfile: $VARIANT_PATH"
+echo "  workspace:  $WORKSPACE_MODE"
+echo "  egress:     $EGRESS_MODE"
 [ -n "$VARIANT_CONTEXT" ] && echo "  context:    $VARIANT_CONTEXT"
 exit 0

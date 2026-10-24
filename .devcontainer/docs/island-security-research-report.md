@@ -4,6 +4,11 @@
 **Environment:** Simple devcontainer (Alpine-based)  
 **Date:** 2026-04-11  
 **Result:** **Historical point-in-time Landlock test; not a complete container security audit.**
+> **2026-10-24 implementation update:** New setup defaults use targeted host control
+> mounts, an optional volume workspace with Git-object exports, an npx shim, and
+> an external TLS-inspecting proxy with a separate network guard. See Section 9
+> and [the hardening guide](hardening.md) for current behavior and validation limits.
+
 > **2026-06-20 security update:** The original conclusion below covered an already-sandboxed Claude child process only.
 > It did not establish that VS Code extensions, arbitrary dev-user processes, the writable workspace bind mount, build inputs, or egress were secure.
 > The hardened configuration pins installer inputs, verifies Go and Safe-chain downloads, keeps tool installations and Island profiles root-owned, isolates agent state, restricts allowlisted egress to TCP/443, and adds CPU/memory limits.
@@ -333,7 +338,7 @@ Note that `/usr/bin/git` still operates within the **outer Claude Code sandbox**
 
 ---
 
-## 8. Current Security Model and Residual Risk (2026-06-20)
+## 8. Security Model Before the October Hardening (2026-06-20)
 
 The devcontainer is defense in depth, not a boundary for mutually untrusted code running as `dev`.
 
@@ -350,3 +355,44 @@ The devcontainer is defense in depth, not a boundary for mutually untrusted code
 - Landlock TCP filtering requires kernel ABI v4 (Linux 6.7 or newer). On older kernels, the external firewall is the port-enforcement layer; preflight and startup tests must be reviewed after each rebuild.
 
 The intended threat model is accidental or malicious behavior in agent-spawned child processes and package hooks. It does not treat the `dev` account, the Docker daemon, the kernel, approved remote services, or the host-mounted project as untrusted principals.
+
+## 9. October Hardening Implementation (2026-10-24)
+
+New setup defaults use a generated Compose topology. A separate network-guard
+container owns the development network's firewall rules; the development
+container has no NET_ADMIN or NET_RAW. Its only external path is the
+TLS-inspecting proxy on TCP/443. The proxy validates exact CONNECT destinations,
+client SNI, decrypted HTTPS authority, and public IPv4 resolutions pinned for
+each upstream connection. The private CA key is isolated in a proxy-only volume.
+Client Docker DNS and non-loopback IPv6 are denied. Legacy in-container IP
+filtering remains an explicit setup option with its earlier residual risks.
+
+Host preparation freezes the bind-mode Git layout. Read-only mounts protect
+editor/lifecycle configuration, Git config/hooks/info, `.gitmodules`, and
+submodule `.git` pointers. Writable ancestor-directory binds prevent replacing
+protected trees by renaming their parents. Ordinary Git data remains writable.
+Unsupported worktree, include, hook-path, symlink, and hardlink layouts are
+rejected in bind mode. Volume mode keeps the host checkout outside the writable
+workspace and seeds/exports Git objects without importing host-local config or
+hooks. Accepted code still needs review before host execution.
+
+The npx shim applies npm-workspace restrictions to normal terminal launches.
+Dependency volumes isolate configured installation paths; a bounded `/tmp`
+tmpfs reduces one storage-exhaustion path. Other writable storage still needs
+quotas. Agent and tool TMPDIR values now use `/tmp/didcon` and its agent-specific
+subdirectories, initialized with dev ownership and mode 0700 in the bounded
+tmpfs. This fixes a reproduced nested-npm scratch-path denial. Existing shared
+`/tmp` profile grants remain until the full compatibility matrix is validated.
+Landlock ABI 6 does not deny known pathname Unix-socket connections; filesystem
+grant removal alone would not provide that protection.
+
+Disposable Docker tests cover mount write/remove/rename denial, root and
+submodule commits, dependency isolation, npx inheritance, volume seeding and
+object-only export, TLS identity checks, direct IPv4/IPv6/metadata/Docker-DNS
+denial, development-root attempts to change firewall rules, and proxy failure.
+These checks do not establish editor attach/reconnect isolation or compatibility
+of every language variant, agent, extension, and package-manager workflow.
+Required host credential and socket forwarding controls remain documented and
+must be validated on the actual IDE/host combination. Reachable core VS Code IPC
+is reported by preflight rather than silently treated as isolated. Kata remains
+deferred until a suitable runtime/host can pass its integration checks.

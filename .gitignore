@@ -1,1 +1,5 @@
 .npm-cache
+__pycache__/
+.devcontainer/didcon-manifest.json
+.devcontainer/seed.bundle
+.devcontainer/compose.generated.json

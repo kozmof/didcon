@@ -191,7 +191,7 @@ RUN chown -R root:root /etc/island && chmod -R go-w,a+rX /etc/island
 # would silently bypass the sandbox for those tools — the Landlock policies would
 # no longer apply to hooks, postinstall scripts, and go build/test children.
 COPY scripts/shims/ /usr/local/bin/
-RUN chmod 755 /usr/local/bin/npm /usr/local/bin/git /usr/local/bin/pnpm /usr/local/bin/claude /usr/local/bin/codex /usr/local/bin/go /usr/local/bin/herdr
+RUN chmod 755 /usr/local/bin/npx /usr/local/bin/npm /usr/local/bin/git /usr/local/bin/pnpm /usr/local/bin/claude /usr/local/bin/codex /usr/local/bin/go /usr/local/bin/herdr
 
 # Shell alias: 'claude' runs via island claude-code profile
 COPY --chown=${USERNAME}:${USERNAME} bash_aliases /home/${USERNAME}/.bash_aliases
@@ -204,7 +204,7 @@ USER root
 # Set up network firewall scripts and log infrastructure
 COPY scripts/ /opt/scripts/
 COPY extra-whitelist.conf /opt/scripts/extra-whitelist.conf
-RUN chmod +x /opt/scripts/*.sh && \
+RUN mkdir -p /etc/didcon && chmod +x /opt/scripts/*.sh && \
     touch /var/log/firewall.log /var/log/firewall-status.txt && \
     chmod 644 /var/log/firewall.log /var/log/firewall-status.txt
 

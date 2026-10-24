@@ -6,10 +6,13 @@
 # XDG conventions natively (~/.config/herdr/config.toml, XDG_STATE_HOME for
 # session state), so no tool-specific env override is needed.
 #
-# TMPDIR is deliberately NOT redirected: pane shells inherit this profile's
-# env, and tools they run (e.g. safe-chain wrapping npm/pnpm) hand $TMPDIR
-# paths to nested island sandboxes, which can only read the shared /tmp.
+# Pane shells and nested tool sandboxes share bounded /tmp/didcon so temporary
+# paths passed between them remain accessible by intersection.
 workspace = false
+
+[[env]]
+name = "TMPDIR"
+literal = "/tmp/didcon"
 
 [[env]]
 name = "XDG_CONFIG_HOME"

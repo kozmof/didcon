@@ -275,6 +275,14 @@ check_island() {
         fail "pnpm at '$pnpm_path' does not appear to be the island shim"
     fi
 
+    local npx_path
+    npx_path=$(type -P npx 2>/dev/null || true)
+    if grep -q 'island run -p npm-workspace' "$npx_path" 2>/dev/null; then
+        pass "npx shim uses npm-workspace ($npx_path)"
+    else
+        fail "npx does not use the npm-workspace shim"
+    fi
+
     # claude shim — protects terminal and script invocations of claude.
     # Note: the VS Code extension uses its own bundled native binary and does not
     # go through this shim; island sandboxing does not apply to the extension.
@@ -622,6 +630,26 @@ check_takumi_guard
 check_takumi_guard_golang
 check_takumi_guard_pypi
 check_island
+
+echo ""
+echo "==> Host integrations and mounts (repeat after attach/reconnect)"
+integration_args=()
+if [[ "${DIDCON_PREFLIGHT_CREDENTIAL_FIXTURE:-0}" == 1 ]]; then
+    integration_args+=(--credential-fixture)
+fi
+if node /opt/scripts/host-integration-check.js "${integration_args[@]}"; then
+    pass "host integration and mount checks"
+else
+    fail "host integration or mount exposure detected; see checks above"
+fi
+
+echo ""
+echo "==> Egress policy"
+if node /opt/scripts/egress-check.js; then
+    pass "egress checks"
+else
+    fail "egress policy could not be verified"
+fi
 
 echo ""
 echo "==> Summary: $PASSES passed, $FAILS failed, $WARNS warnings"

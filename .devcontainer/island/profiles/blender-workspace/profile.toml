@@ -33,3 +33,8 @@ literal = "/workspace/.blender-user"
 [[env]]
 name = "XDG_CONFIG_HOME"
 literal = "/workspace/.blender-user/xdg"
+
+# Shared bounded scratch is accessible to parent and nested tool policies.
+[[env]]
+name = "TMPDIR"
+literal = "/tmp/didcon"

@@ -43,11 +43,14 @@
     "--cap-add=NET_RAW",
     "--cap-add=SETUID",
     "--cap-add=SETGID",
+    // Only used by entrypoint to initialize dependency-volume root ownership.
+    "--cap-add=CHOWN",
     "--security-opt=no-new-privileges:true",
     // large tests may need to increase this value.
     "--pids-limit=512",
     "--memory=8g",
     "--cpus=4",
+    "--tmpfs=/tmp:rw,nosuid,nodev,size=1g,mode=1777",
     "--init"
   ],
   "overrideCommand": false,
@@ -59,6 +62,11 @@
         "-openai.chatgpt"
       ],
       "settings": {
+        "dev.containers.dockerCredentialHelper": false,
+        "dev.containers.gitCredentialHelperConfigLocation": "none",
+        "dev.containers.copyGitConfig": false,
+        "dev.containers.mountWaylandSocket": false,
+        "remote.autoForwardPorts": false,
         "workbench.colorCustomizations": {
           "titleBar.activeBackground": "#009e15",
           "titleBar.activeForeground": "#ffffff",
@@ -73,13 +81,17 @@
   },
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  // Run host/prepare.py explicitly once after reviewing the Git layout. Startup
+  // validates that frozen layout and never approves new submodule pointers.
+  "initializeCommand": ["python3", "${localWorkspaceFolder}/.devcontainer/host/prepare.py", "--check", "${localWorkspaceFolder}"],
   // Keep host-executed control surfaces immutable from inside the container.
   // The Git index and refs remain writable, so normal add/commit operations work.
   // These mounts require a standard Git checkout with a .git directory.
   "mounts": [
     "source=${localWorkspaceFolder}/.devcontainer,target=/workspace/.devcontainer,type=bind,readonly",
     "source=${localWorkspaceFolder}/.git/config,target=/workspace/.git/config,type=bind,readonly",
-    "source=${localWorkspaceFolder}/.git/hooks,target=/workspace/.git/hooks,type=bind,readonly"
+    "source=${localWorkspaceFolder}/.git/hooks,target=/workspace/.git/hooks,type=bind,readonly",
+    "source=${localWorkspaceFolder}/.devcontainer/didcon-manifest.json,target=/etc/didcon/manifest.json,type=bind,readonly"
   ],
   "postCreateCommand": "/opt/scripts/install-safe-chain.sh"
 }

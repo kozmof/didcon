@@ -2,8 +2,9 @@
 # Applied explicitly via the 'codex' shell alias (not auto-activated by CWD).
 #
 # workspace = false redirects XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME,
-# and TMPDIR to explicit isolated paths, isolating Codex's config/history from
-# the real ~/.codex directory.
+# to explicit isolated paths, isolating Codex's config/history from the real
+# ~/.codex directory. TMPDIR uses a bounded shared scratch hierarchy so nested
+# tool profiles can read files passed by their parent.
 workspace = false
 
 [[env]]
@@ -28,7 +29,7 @@ literal = "/home/dev/.island/codex/runtime"
 
 [[env]]
 name = "TMPDIR"
-literal = "/home/dev/.island/codex/tmp"
+literal = "/tmp/didcon/codex"
 
 [[env]]
 name = "CODEX_HOME"

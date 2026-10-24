@@ -1,0 +1,4 @@
+#!/bin/sh
+# npm exec can install and immediately execute arbitrary package code. Use the
+# same inherited restrictions as npm, including when launched from a terminal.
+XDG_CONFIG_HOME=/etc exec island run -p npm-workspace -- /usr/local/share/npm-global/bin/npx "$@"

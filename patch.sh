@@ -42,7 +42,10 @@ fi
 if { : <>/dev/tty; } 2>/dev/null; then
   TTY=/dev/tty
 else
-  TTY=/dev/stdin
+  # The file-walking loops redirect fd 0. Keep the caller's input separately so
+  # piped answers are not accidentally read from find's NUL-delimited output.
+  exec 3<&0
+  TTY=/dev/fd/3
 fi
 
 # Colorize output only when writing to a terminal.
@@ -78,7 +81,15 @@ apply_all=0
 # Walk every file shipped in this repo's .devcontainer.
 while IFS= read -r -d '' src_file; do
   rel="${src_file#"$SRC"/}"
+  # Project-local generated state must never be copied from the template repo.
+  case "$rel" in didcon-manifest.json|seed.bundle|compose.generated.json|*/__pycache__/*) continue ;; esac
   dst_file="$DST/$rel"
+
+  if [ "$rel" = devcontainer.json ] && [ -f "$DST/didcon-manifest.json" ]; then
+    echo "Keeping generated devcontainer.json; regenerate it with host/prepare.py after patching."
+    skipped=$((skipped + 1))
+    continue
+  fi
 
   if [ -f "$dst_file" ] && cmp -s "$src_file" "$dst_file"; then
     identical=$((identical + 1))
@@ -142,6 +153,7 @@ done < <(find "$SRC" -type f -print0 | sort -z)
 extra=0
 while IFS= read -r -d '' dst_file; do
   rel="${dst_file#"$DST"/}"
+  case "$rel" in didcon-manifest.json|seed.bundle|compose.generated.json|*/__pycache__/*) continue ;; esac
   if [ ! -f "$SRC/$rel" ]; then
     if [ "$extra" -eq 0 ]; then
       echo
@@ -155,3 +167,5 @@ done < <(find "$DST" -type f -print0 | sort -z)
 
 echo
 echo "${C_BLD}Done.${C_RST} $patched patched, $skipped skipped, $identical unchanged, $extra extra."
+echo "Review your Git/submodule layout, then regenerate protected mounts before rebuilding:"
+printf '  python3 %q %q\n' "$DST/host/prepare.py" "$TARGET_DIR"

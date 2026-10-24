@@ -93,3 +93,8 @@ literal = "https://pypi.flatt.tech/simple/"
 [[env]]
 name = "UV_REQUIRE_HASHES"
 literal = "1"
+
+# Shared bounded scratch is accessible to parent and nested tool policies.
+[[env]]
+name = "TMPDIR"
+literal = "/tmp/didcon"

@@ -16,3 +16,8 @@ literal = "/workspace/.npm-cache"
 [[env]]
 name = "XDG_CONFIG_HOME"
 literal = "/home/dev/.config"
+
+# Shared bounded scratch is accessible to parent and nested tool policies.
+[[env]]
+name = "TMPDIR"
+literal = "/tmp/didcon"

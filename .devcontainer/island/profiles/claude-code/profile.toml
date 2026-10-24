@@ -2,8 +2,9 @@
 # Applied explicitly via the 'claude' shell alias (not auto-activated by CWD).
 #
 # workspace = false redirects XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME,
-# and TMPDIR to explicit isolated paths, isolating Claude's config/history from
-# the real ~/.claude directory.
+# to explicit isolated paths, isolating Claude's config/history from the real
+# ~/.claude directory. TMPDIR uses a bounded shared scratch hierarchy so nested
+# tool profiles can read files passed by their parent.
 #
 # CLAUDE_CONFIG_DIR redirects Claude Code's own config/credentials dir away
 # from the real ~/.claude (which Landlock denies) to the island-managed
@@ -37,4 +38,4 @@ literal = "/home/dev/.island/claude/runtime"
 
 [[env]]
 name = "TMPDIR"
-literal = "/home/dev/.island/claude/tmp"
+literal = "/tmp/didcon/claude"

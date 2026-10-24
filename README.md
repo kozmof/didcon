@@ -14,9 +14,9 @@ git clone <this-repo> /tmp/didcon
 /tmp/didcon/setup.sh /path/to/your/project
 ```
 
-It asks two questions and writes both answers into the copied
-devcontainer.json, so the language variant and the container name need no
-hand-editing afterwards:
+It asks for the language variant, container name, and workspace mode, then
+generates the protected mounts and TLS-inspecting proxy configuration. Bash,
+Git, Python 3.9+, Docker, and Compose v2 are required on the host:
 
 ```
 Which Dockerfile should devcontainer.json build?
@@ -29,13 +29,18 @@ Which Dockerfile should devcontainer.json build?
 
 Choice [1]: 5
 "name" in devcontainer.json [your-project]:
+Workspace mode [bind] (bind / volume):
 ```
 
 Choosing the Blender variant also writes the `"context": "."` line it
 requires. The name defaults to the target directory's basename rather than
 "didcon", so containers from different projects stay distinguishable.
 
-With no terminal to ask on, both defaults are taken.
+With no terminal, defaults are used. Set `DIDCON_WORKSPACE_MODE=volume` for an
+isolated workspace seeded from committed HEAD; bind mode shares the trusted
+host checkout. New setups use the external TLS-inspecting proxy by default.
+See [hardening and reviewed exports](.devcontainer/docs/hardening.md) for host
+forwarding settings, setup prerequisites, storage limits, and remaining risks.
 
 TARGET_DIR defaults to the current directory if omitted. The script
 refuses to run if the target already has a .devcontainer, so it never
@@ -66,15 +71,23 @@ preserves hand-crafted local changes such as custom whitelists and tweaked
 policies. Files that exist only in your project are reported at the end but
 never deleted.
 
+Generated project configuration is retained during updates. After patching,
+review the Git layout and regenerate it on the host before rebuilding:
+
+```sh
+python3 /path/to/your/project/.devcontainer/host/prepare.py --egress proxy /path/to/your/project
+```
+
 ## Language variants
-devcontainer.json selects one of five Dockerfiles. Dockerfile builds a
+Setup selects one of five Dockerfiles. Dockerfile builds a
 Node-only image, Dockerfile.withGo adds Go, Dockerfile.withRust adds Rust,
 and Dockerfile.withZig adds Zig. The fifth,
 specific-tool-dockerfile/blender/Dockerfile.withBlender, is for Blender addon
 development and adds headless Blender plus uv.
 
-setup.sh asks which of the five to use and writes the choice into
-devcontainer.json; switching later means editing it by hand.
+setup.sh records the choice in the generated build configuration. With proxy
+mode, the build lives in `compose.generated.json`; its reviewed source settings
+are retained in `didcon-manifest.json`. Generated topology is checked at launch.
 
 The Blender variant lives in its own subdirectory rather than beside the
 others, so devcontainer.json needs the context spelled out (setup.sh writes
@@ -269,20 +282,15 @@ profiles, the shims, and that each sandbox blocks and allows what it
 should. Run it as the dev user after postCreateCommand finishes.
 
 ## Host control surfaces
-The standard configuration bind-mounts .devcontainer, .git/config, and
-.git/hooks read-only inside the container. This prevents an agent or package
-hook from persisting code that would execute during a later host-side rebuild
-or Git command, while leaving the Git index and refs writable for normal
-commits.
+Host preparation protects editor settings, lifecycle configuration, Git control
+files, and submodule pointers while leaving normal Git data writable. Ancestor
+directory mounts prevent replacing the protected tree by renaming its parent.
+Startup rejects changes to the reviewed topology. Bind mode rejects worktrees
+and unsupported Git layouts; use volume mode for untrusted development.
 
-These protective mounts assume a conventional checkout with a .git directory.
-Git worktrees, where .git is a file, need equivalent host-side read-only
-mounts adapted to their actual Git directory.
-
-This blocks the most direct hook and rebuild-persistence paths, but it does not
-turn a writable host checkout into a hostile-code boundary. An agent can still
-change project scripts that a user later runs on the host. For fully untrusted
-repositories, clone into a container volume and export only reviewed patches.
-The DNS resolver and VS Code/X11 sockets are also integration channels rather
-than security boundaries. Remove or proxy them when the threat model includes
-data exfiltration or hostile container processes.
+These controls reduce persistence paths through known files. Writable source
+and scripts can still affect a later host build. Volume mode keeps development
+writes off the host checkout and exports Git objects for review before checkout.
+Host credential, agent, display, and VS Code IPC exposure must also be checked
+after attach and reconnect. Read the [hardening guide](.devcontainer/docs/hardening.md)
+before relying on these controls.
