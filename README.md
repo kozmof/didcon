@@ -279,6 +279,43 @@ blender -b --python runs it, so for addon code the blender-workspace sandbox is
 the whole of the defence — the same weight zig-workspace carries in that image.
 
 ## Checking a running container
+
+Run the comprehensive doctor from an ordinary container terminal as `dev`, after
+`postCreateCommand` completes, and again after IDE attach/reconnect:
+
+```sh
+didcon-doctor
+# Equivalent: /opt/scripts/doctor.sh
+```
+
+It runs the security preflight and checks installed tool versions, the actual
+kernel Landlock ABI, capabilities, seccomp, resource limits, disk/inode capacity,
+writable storage, proxy environment, public CA trust, and live CONNECT/SNI/Host
+enforcement. Optional toolchains are checked when installed or required by the
+selected image variant. It creates and removes only small storage probes; it
+does not install packages, repair configuration, or log into agents.
+
+```sh
+didcon-doctor --offline                    # Skip live network checks
+didcon-doctor --json > doctor-report.json  # Structured report
+didcon-doctor --strict                     # Treat warnings as failures
+```
+
+Reports distinguish passes, failures, warnings, and skipped checks. Exit status
+is 0 without failures, 1 for failures (also warnings with `--strict`), and 2 for
+invalid arguments. Offline reports explicitly mark live enforcement unverified.
+Kernel/profile limitations and host storage quotas that cannot be verified from
+inside the container remain warnings. Host IDE settings, sidecar privileges,
+actual agent authentication, and the complete workflow matrix need separate
+validation. The doctor does not require access to Docker or the CA private key.
+
+The doctor is installed by every Dockerfile variant. After applying an update
+with `patch.sh`, rebuild the container to install it and its native ABI probe.
+See the [hardening guide](.devcontainer/docs/hardening.md#container-doctor) for
+credential-fixture checks and report scope.
+
+The focused security preflight remains available separately:
+
 ```
 /opt/scripts/security-preflight.sh
 ```

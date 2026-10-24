@@ -8,6 +8,15 @@ fi
 set -uo pipefail
 IFS=$'\n\t'
 
+OFFLINE=0
+for argument in "$@"; do
+    case "$argument" in
+        --offline) OFFLINE=1 ;;
+        --help|-h) echo 'Usage: security-preflight.sh [--offline]'; exit 0 ;;
+        *) echo 'Usage: security-preflight.sh [--offline]' >&2; exit 2 ;;
+    esac
+done
+
 PASSES=0
 FAILS=0
 WARNS=0
@@ -29,6 +38,20 @@ format_command() {
     local formatted
     printf -v formatted '%q ' "$@"
     printf '%s' "${formatted% }"
+}
+
+check_registry_endpoint() {
+    local host="$1" suffix="${2:-/}" http_code
+    if [[ "$OFFLINE" -eq 1 ]]; then
+        warn "$host reachability skipped (--offline)"
+        return
+    fi
+    http_code=$(wget --timeout=5 --tries=1 --server-response -qO- "https://$host$suffix" 2>&1 | awk '/HTTP\//{code=$2} END{print code+0}')
+    if [[ "${http_code:-0}" -gt 0 ]]; then
+        pass "$host reachable (HTTP $http_code)"
+    else
+        fail "$host not reachable (network or proxy issue)"
+    fi
 }
 
 
@@ -101,15 +124,7 @@ check_takumi_guard() {
         fail "registry=https://npm.flatt.tech/ not found in $npmrc"
     fi
 
-    # Any HTTP response (including 4xx) means the endpoint is up.
-    local http_code
-    http_code=$(wget --timeout=5 --server-response -qO- https://npm.flatt.tech/ 2>&1 | awk '/HTTP\//{code=$2} END{print code+0}')
-
-    if [[ "${http_code:-0}" -gt 0 ]]; then
-        pass "npm.flatt.tech reachable (HTTP $http_code)"
-    else
-        fail "npm.flatt.tech not reachable (network or firewall issue)"
-    fi
+    check_registry_endpoint npm.flatt.tech
 }
 
 # ---------------------------------------------------------------------------
@@ -128,21 +143,14 @@ check_takumi_guard_golang() {
 
     # Read GOPROXY directly from the real binary to avoid the island shim.
     local proxy
-    proxy=$("$go_bin" env GOPROXY 2>/dev/null || true)
+    proxy=$(GOTOOLCHAIN=local "$go_bin" env GOPROXY 2>/dev/null || true)
     if [[ "$proxy" == "https://golang.flatt.tech" ]]; then
         pass "GOPROXY configured: $proxy"
     else
         fail "GOPROXY is '$proxy' — expected https://golang.flatt.tech (no ,direct fallback)"
     fi
 
-    # Any HTTP response (including 4xx) means the endpoint is up.
-    local http_code
-    http_code=$(wget --timeout=5 --server-response -qO- https://golang.flatt.tech/ 2>&1 | awk '/HTTP\//{code=$2} END{print code+0}')
-    if [[ "${http_code:-0}" -gt 0 ]]; then
-        pass "golang.flatt.tech reachable (HTTP $http_code)"
-    else
-        fail "golang.flatt.tech not reachable (network or firewall issue)"
-    fi
+    check_registry_endpoint golang.flatt.tech
 }
 
 # ---------------------------------------------------------------------------
@@ -199,14 +207,7 @@ check_takumi_guard_pypi() {
         fail "uv-workspace does not force UV_REQUIRE_HASHES (got '${hashes_out:-unset}')"
     fi
 
-    # Any HTTP response (including 4xx) means the endpoint is up.
-    local http_code
-    http_code=$(wget --timeout=5 --server-response -qO- https://pypi.flatt.tech/simple/ 2>&1 | awk '/HTTP\//{code=$2} END{print code+0}')
-    if [[ "${http_code:-0}" -gt 0 ]]; then
-        pass "pypi.flatt.tech reachable (HTTP $http_code)"
-    else
-        fail "pypi.flatt.tech not reachable (network or firewall issue)"
-    fi
+    check_registry_endpoint pypi.flatt.tech /simple/
 }
 
 # ---------------------------------------------------------------------------
@@ -645,7 +646,9 @@ fi
 
 echo ""
 echo "==> Egress policy"
-if node /opt/scripts/egress-check.js; then
+if [[ "$OFFLINE" -eq 1 ]]; then
+    warn "live egress checks skipped (--offline)"
+elif node /opt/scripts/egress-check.js; then
     pass "egress checks"
 else
     fail "egress policy could not be verified"

@@ -83,6 +83,59 @@ You can probe another known path without sending protocol commands:
 node /opt/scripts/host-integration-check.js --socket /path/to/socket
 ```
 
+## Container doctor
+
+Every image variant installs `didcon-doctor` (also `/opt/scripts/doctor.sh`). Run
+it as `dev` in an ordinary container terminal after post-create installation,
+and repeat after IDE attach/reconnect. Running it as root, outside a prepared
+container, or inside an agent sandbox does not validate the intended context.
+
+```sh
+didcon-doctor
+didcon-doctor --offline
+didcon-doctor --json > doctor-report.json
+didcon-doctor --strict
+```
+
+The report includes tool versions and optional variant requirements, root-owned
+assets, effective capabilities and startup bounds, no-new-privileges, seccomp,
+cgroup memory/CPU/process limits, storage space/inodes, and small writable-path
+probes that are removed immediately. It reuses the security preflight's profile,
+shim, registry, mount, known-socket, credential-configuration, and egress checks.
+Commands have output limits and deadlines; reports summarize child output rather
+than copying it, and do not dump environment or credential values.
+
+A small static helper queries the kernel's actual Landlock ABI using
+[`landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)`](https://docs.kernel.org/userspace-api/landlock.html#landlock-abi-versions).
+It creates no ruleset and changes no process restrictions. The helper supports
+Linux x86-64 and aarch64; other architectures return an unsupported result. The
+doctor warns when the kernel cannot support all ABI 6 profile features. Current
+ABI 6 profiles also retain the pathname Unix-socket limitation even on a newer
+kernel; the doctor does not treat the profile declaration as proof of isolation.
+
+Proxy checks verify the reviewed fixed endpoint, trust-store paths, public-only
+CA validity and system trust, and known environment/Git TLS-verification
+bypasses. Live requests exercise allowed HTTPS, denied CONNECT, missing or
+mismatched SNI, and mismatched decrypted Host. SNI attacks deliberately ignore
+client-side certificate errors to verify enforcement by the proxy. These use
+the standard `api.github.com`/`github.com` fixtures from the default allowlist.
+The preflight verifies direct IPv4/IPv6/metadata and Docker-DNS denial.
+
+`--offline` skips registry reachability, live proxy requests, and active egress
+probes; static configuration and local sandbox/mount checks still run. Reports
+mark this missing coverage and remain degraded. Optional absent toolchains are
+skipped; a missing tool required by the selected variant fails. `--strict` makes
+warnings fail as well. Exit codes are 0 without failures, 1 for failures (or
+strict warnings), and 2 for invalid arguments.
+
+Host quota coverage, IDE forwarding settings, sidecar capabilities, live DNS
+rebinding, and real agent authentication cannot be proved by these checks.
+Resource-limit and quota warnings require host review. The doctor never repairs
+configuration, installs packages, or authenticates agents, and needs neither the
+Docker socket nor the proxy CA private key.
+
+## Disposable credential checks
+
 Default preflight inspects credential-helper configuration without invoking a
 real host helper or printing its value. To test credential forwarding, configure
 an isolated disposable helper for `https://didcon-preflight.invalid` containing
@@ -93,7 +146,12 @@ forwarding and verify denial:
 node /opt/scripts/host-integration-check.js --credential-fixture
 # Or include the same opt-in check in the full preflight:
 DIDCON_PREFLIGHT_CREDENTIAL_FIXTURE=1 /opt/scripts/security-preflight.sh
+# Explicit doctor opt-in; use only the disposable fixture described above:
+didcon-doctor --credential-fixture
 ```
+
+The doctor ignores an inherited `DIDCON_PREFLIGHT_CREDENTIAL_FIXTURE` value;
+its own flag is required before invoking the disposable `.invalid` helper probe.
 
 This opt-in invokes the configured helper for the fixed `.invalid` fixture only,
 with prompts disabled and a timeout. Credential values and helper output are

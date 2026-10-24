@@ -58,6 +58,7 @@ def main():
             compose('up', '-d', '--no-build', '--wait', '--wait-timeout', '90')
             if args.workflows:
                 compose('exec', '-T', '--user', 'dev', 'devcontainer', '/bin/bash', '/tests/integration_workflows.sh')
+                compose('exec', '-T', '--user', '0', 'devcontainer', 'node', '/tests/integration_doctor.js')
                 return
             compose('exec', '-T', '--user', 'dev', 'devcontainer', 'node', '/tests/integration_proxy_client.js')
             compose('exec', '-T', '--user', '0', 'devcontainer', 'node', '/tests/integration_proxy_client.js')

@@ -135,6 +135,51 @@ Logs: `/tmp/didcon-smokescreen-integration.log` and
 `/tmp/didcon-smokescreen-workflows.log`. Build the sidecar with
 `docker build .devcontainer/egress` to reproduce its Go tests.
 
+## Container doctor (2026-10-24)
+
+Every Dockerfile variant now installs `didcon-doctor`, its shared JavaScript
+diagnostics, and a static Landlock ABI probe. The Node image was built and tested
+as `didcon-hardening-test:doctor`, image ID
+`sha256:dafb3160211ea39e2c205781f774de4977116d38398bc463a2e5624d28be5347`
+on linux/amd64. The rebuilt image uses Node `26.9.0`; this is separate from the
+earlier Node-image checkpoint above. Non-Node image builds remain unverified.
+
+Passed checks:
+
+```sh
+node --test tests/test_doctor.js tests/test_host_integration.js
+python3 -m unittest discover -s tests -q
+docker build --pull -t didcon-hardening-test:doctor -f .devcontainer/Dockerfile .devcontainer
+python3 tests/integration_proxy.py --image didcon-hardening-test:doctor --packaged --workflows
+```
+
+The 12 Node tests (eight doctor, four mount checks) and 19 Python tests pass.
+The packaged workflow runs the doctor as dev after safe-chain installation and
+validates its JSON report, tools, resource limits, public certificate trust, and
+live CONNECT/SNI/Host enforcement. Its embedded production preflight reports
+**60 passed, 0 failed, 0 warnings**. Doctor reports have no failures but retain
+warnings for documented kernel/profile, quota, and test-resource limitations.
+
+The native probe reports **Landlock ABI 3** on this host; doctor warns about
+the ABI 6 profile features that are unavailable and the remaining pathname
+Unix-socket limitation. Offline mode marks live coverage incomplete. Strict
+mode rejects warnings. Insecure TLS environment overrides and URL-specific Git
+TLS settings produce failures. Root execution returns a failing, incomplete
+JSON report rather than checking the wrong security context.
+
+A disposable Git helper proves default doctor runs do not invoke it, even when
+the preflight credential-fixture environment flag is inherited. Explicit
+`--credential-fixture` invokes the dummy helper and detects exposure, while
+keeping dummy username/password values out of the JSON output. The test helper
+is interpreted explicitly because the bounded `/tmp` may be mounted noexec.
+The integration run cleaned up its own containers, networks, and volumes; a
+subsequent Docker check found no running `didcon-*` test containers.
+
+Evidence logs: `/tmp/didcon-doctor-build.log` and
+`/tmp/didcon-doctor-workflows.log`. Actual IDE forwarding/settings, host quota
+coverage, sidecar privileges, and authenticated agent workflows remain separate
+validation tasks.
+
 ## Remaining work
 
 1. Extend the passing Node workflow checks to Go, Rust, Zig, Blender/uv, actual

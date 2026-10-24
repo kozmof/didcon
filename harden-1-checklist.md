@@ -32,6 +32,14 @@ still pass. Packaged Node workflows pass through Smokescreen, including safe-cha
 and the full **60 passed, 0 failed, 0 warnings** preflight. Planning files remain
 because the wider hardening validation matrix is incomplete.
 
+**Container doctor:** every image recipe now installs `didcon-doctor` with text,
+JSON, offline, strict, and explicit disposable-credential modes. The packaged
+Node image passes the doctor integration checks and all 60 embedded production
+preflight checks. Twelve Node tests and 19 Python tests pass. The native probe
+reports this host's actual Landlock ABI 3; doctor preserves warnings for reduced
+profile support, pathname sockets, and unverified host quotas. Non-Node images,
+real IDE integrations, and authenticated agent workflows remain open.
+
 ## Preparation
 
 - [ ] Record the supported host environments, Docker and Dev Containers versions, kernel/Landlock capabilities, and image variants to validate.

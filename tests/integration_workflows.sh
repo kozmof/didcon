@@ -67,7 +67,7 @@ cd /workspace
 /usr/local/bin/git -c credential.helper= -c core.hooksPath=/dev/null \
     ls-remote https://github.com/landlock-lsm/island.git HEAD >/dev/null
 
-echo 'TEST: full production preflight after safe-chain installation'
-/bin/bash /opt/scripts/security-preflight.sh
+echo 'TEST: comprehensive doctor and production preflight after safe-chain installation'
+node /tests/integration_doctor.js
 
 echo 'PASS: Node agent CLI, safe-chain, npm/npx/pnpm, nested scratch, and Git HTTPS smoke tests'
