@@ -45,6 +45,10 @@ It preserves a configured build variant and rejects an unrelated
 
 ## Host integrations
 
+Read [VS Code and host socket security](socket-security.md) for the threat model,
+risks of each socket family, interaction with didcon protections, verification
+limits, and the meaning of accepting an exposure.
+
 Configure forwarding in the host VS Code **user** settings, including any
 separate profile used for container work. On Windows with WSL, open
 **Preferences: Open User Settings (JSON)** in the Windows VS Code instance that

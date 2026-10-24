@@ -316,6 +316,9 @@ If **Host integrations and mounts** fails, doctor lists the failing paths. Run
 `node /opt/scripts/host-integration-check.js` for the focused check. Reachable
 editor IPC is a failure under the strict policy, including expected VS Code
 listeners; the finding describes exposure, not necessarily a broken setup.
+The [socket security guide](.devcontainer/docs/socket-security.md) covers each
+socket's purpose, potential risks, optional integration controls, doctor limits,
+and approval behavior.
 
 Apply the [host forwarding settings](.devcontainer/docs/hardening.md#host-integrations)
 in the VS Code instance that opens the container, then recreate it. These
