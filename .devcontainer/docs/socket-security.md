@@ -251,6 +251,14 @@ to an untrusted workload, provided the sensitive integrations are not forwarded
 back into it. A different container runtime alone does not remove a forwarded
 credential or display service.
 
+Socket isolation also leaves malicious packages able to damage their permitted
+workspace or abuse permitted network access. Separating only agent execution
+leaves a gap if installation scripts, tests, or editor tools still run with
+greater authority, or if modified files are later executed there. The
+[next hardening plan](package-isolation-plan.md) proposes separate editor,
+agent, and package execution boundaries, controlled result promotion, and tests
+for those gaps. That architecture is planned, not implemented.
+
 ## Verify the actual result
 
 Run these as `dev` in an ordinary container terminal after post-create completes

@@ -320,6 +320,10 @@ The [socket security guide](.devcontainer/docs/socket-security.md) covers each
 socket's purpose, potential risks, optional integration controls, doctor limits,
 and approval behavior.
 
+The [next hardening plan](.devcontainer/docs/package-isolation-plan.md) records
+the proposed separation of editor, agent, and malicious-package execution. Its
+implementation and verification tasks are still pending.
+
 Apply the [host forwarding settings](.devcontainer/docs/hardening.md#host-integrations)
 in the VS Code instance that opens the container, then recreate it. These
 `dev.containers.*` controls are documented separately from the template's
