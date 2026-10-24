@@ -71,12 +71,18 @@ preserves hand-crafted local changes such as custom whitelists and tweaked
 policies. Files that exist only in your project are reported at the end but
 never deleted.
 
-Generated project configuration is retained during updates. After patching,
-review the Git layout and regenerate it on the host before rebuilding:
+Generated project configuration is retained during updates. `patch.sh` prints
+the remaining steps; it does not regenerate configuration or build images.
+To enable or update Smokescreen after patching, review the Git layout and run
+these commands on the host:
 
 ```sh
 python3 /path/to/your/project/.devcontainer/host/prepare.py --egress proxy /path/to/your/project
+docker compose -f /path/to/your/project/.devcontainer/compose.generated.json build proxy cert-init
 ```
+
+Then select **Dev Containers: Rebuild Container** in VS Code. Keep existing proxy
+CA volumes so the migration retains the same certificate trust.
 
 ## Language variants
 Setup selects one of five Dockerfiles. Dockerfile builds a

@@ -167,5 +167,8 @@ done < <(find "$DST" -type f -print0 | sort -z)
 
 echo
 echo "${C_BLD}Done.${C_RST} $patched patched, $skipped skipped, $identical unchanged, $extra extra."
-echo "Review your Git/submodule layout, then regenerate protected mounts before rebuilding:"
-printf '  python3 %q %q\n' "$DST/host/prepare.py" "$TARGET_DIR"
+echo "To enable or update Smokescreen, review your Git/submodule layout, then run on the host:"
+printf '  python3 %q --egress proxy %q\n' "$DST/host/prepare.py" "$TARGET_DIR"
+printf '  docker compose -f %q build proxy cert-init\n' "$DST/compose.generated.json"
+echo "Then select Dev Containers: Rebuild Container in VS Code."
+echo "Keep existing proxy CA volumes."
