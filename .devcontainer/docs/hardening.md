@@ -45,15 +45,10 @@ It preserves a configured build variant and rejects an unrelated
 
 ## Host integrations
 
-Set these in the host VS Code **user** settings, including any separate profile
-used for container work. On Windows with WSL, open **Preferences: Open User
-Settings (JSON)** in the Windows VS Code instance that launches Dev Containers.
-Values in `customizations.vscode.settings` apply inside the opened container;
-they do not configure the parent VS Code instance before it creates the container.
-In Dev Containers 0.469.0, `mountWaylandSocket` and `forwardWSLServices` have
-application scope, while the
-three credential/Git-copy settings below have machine scope. They need host-side
-configuration even when the container template already lists the same values.
+Configure forwarding in the host VS Code **user** settings, including any
+separate profile used for container work. On Windows with WSL, open
+**Preferences: Open User Settings (JSON)** in the Windows VS Code instance that
+launches Dev Containers, then merge these entries into the existing object:
 
 ```json
 {
@@ -66,19 +61,42 @@ configuration even when the container template already lists the same values.
 }
 ```
 
+The five `dev.containers.*` entries control the host extension. In Dev Containers
+0.469.0, the two display/WSL settings have application scope and the three
+credential/Git-copy settings have machine scope. The template intentionally
+omits them from `customizations.vscode.settings`, which supplies
+[container-specific editor settings](https://containers.dev/supporting.html).
+Putting these host controls there does not configure the host extension.
+`setup.sh` and `patch.sh` update project files; host user settings require this
+separate step.
+
+`patch.sh` preserves existing generated `devcontainer.json` files. When cleaning
+one of those configurations, remove any old copies of the five `dev.containers.*`
+entries from `customizations.vscode.settings`. Keep their authoritative copies
+in host VS Code user settings.
+
+`remote.autoForwardPorts: false` also remains in the template's container
+customizations because it configures the attached editor session. Setting it in
+host user settings supplies the same default for other remote sessions.
+
 Rebuild/recreate the container after applying host settings. Existing forwarded
 mounts and live socket listeners are not removed by changing settings or clearing
 environment variables in an already running container.
 
-On Windows/WSL, `mountWaylandSocket` disables the Wayland bind mount.
-`forwardWSLServices` controls the additional WSL forwarding host, but in Dev
-Containers 0.469.0 it does not exclude services from a primary CLI host that is
-already WSL. X11 forwarding can therefore remain with both settings disabled.
-The template and proxy Compose generator set `DISPLAY=disabled` before attach:
-the inspected extension skips creating its automatic X11 relay when the
-container already has a nonempty DISPLAY. An explicit project DISPLAY value is
-preserved. This prevents relay creation in that extension version; doctor still
-checks actual sockets. Recreate after regenerating the Compose configuration.
+Wayland and X11 use different controls:
+
+| Integration | Configure before container creation/attachment | Effect |
+| --- | --- | --- |
+| Wayland | `dev.containers.mountWaylandSocket: false` in host VS Code user settings | Disables the automatic Wayland socket bind mount. |
+| Additional WSL forwarding services | `dev.containers.forwardWSLServices: false` in host VS Code user settings | Excludes an additional WSL forwarding host in 0.469.0; the primary CLI host still supplies services. |
+| X11 (`/tmp/.X11-unix/X0`) | `DISPLAY=disabled` in the container environment, already supplied by didcon | Prevents automatic X11 relay creation in the inspected 0.469.0 extension. |
+
+Disabling Wayland does not disable X11. The template and proxy Compose generator
+set the nonempty DISPLAY value before attach; an explicit project override is
+preserved. Changing DISPLAY in an already attached terminal does not stop an
+existing relay. For an existing project, apply the patch, regenerate the Compose
+configuration as instructed by `patch.sh`, and recreate the container. Doctor
+still checks actual socket connections to verify the result.
 
 Disable SSH/GPG agent and display forwarding separately using the controls
 available on the host, Remote SSH, WSL, and installed Dev Containers extension.

@@ -41,6 +41,9 @@ isolated workspace seeded from committed HEAD; bind mode shares the trusted
 host checkout. New setups use the external TLS-inspecting Smokescreen proxy by default.
 See [hardening and reviewed exports](.devcontainer/docs/hardening.md) for host
 forwarding settings, setup prerequisites, storage limits, and remaining risks.
+Configure host forwarding restrictions separately in **host VS Code user
+settings**. `setup.sh` and `patch.sh` update project files; neither configures the
+host VS Code profile.
 
 TARGET_DIR defaults to the current directory if omitted. The script
 refuses to run if the target already has a .devcontainer, so it never
@@ -309,18 +312,19 @@ inside the container remain warnings. Host IDE settings, sidecar privileges,
 actual agent authentication, and the complete workflow matrix need separate
 validation. The doctor does not require access to Docker or the CA private key.
 
-If **Host integrations and mounts** fails, run
-`node /opt/scripts/host-integration-check.js` to see the individual paths; doctor
-also lists failing socket paths directly. Older reports count the same findings
-again as an overall preflight failure. Reachable editor IPC
-is a failure under the strict policy, including normal VS Code listeners. Apply
-the [host forwarding settings](.devcontainer/docs/hardening.md#host-integrations)
-in the VS Code instance that opens the container, then recreate it; container
-customizations do not replace host settings.
-On Windows/WSL, disable both `dev.containers.mountWaylandSocket` and
-`dev.containers.forwardWSLServices`. Primary WSL hosts can still supply forwarding
-services; the template also sets DISPLAY before attach to prevent automatic X11
-relay creation in Dev Containers 0.469.0. See the guide for the verified scope.
+If **Host integrations and mounts** fails, doctor lists the failing paths. Run
+`node /opt/scripts/host-integration-check.js` for the focused check. Reachable
+editor IPC is a failure under the strict policy, including expected VS Code
+listeners; the finding describes exposure, not necessarily a broken setup.
+
+Apply the [host forwarding settings](.devcontainer/docs/hardening.md#host-integrations)
+in the VS Code instance that opens the container, then recreate it. These
+`dev.containers.*` controls are documented separately from the template's
+container-specific editor settings. Wayland mounting uses the host
+`dev.containers.mountWaylandSocket` setting. X11 (`/tmp/.X11-unix/X0`) is separate:
+didcon sets `DISPLAY=disabled` before attach to suppress its automatic relay in
+Dev Containers 0.469.0. See the guide for the WSL forwarding limits and verify
+actual connections after recreation/reconnect.
 
 To accept selected socket exposures, run on the **host**:
 

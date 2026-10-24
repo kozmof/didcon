@@ -62,13 +62,9 @@
         "-openai.chatgpt"
       ],
       "settings": {
-        // Also set these forwarding controls in the host VS Code user settings.
-        // Container customizations cannot prevent parent-side creation of mounts.
-        "dev.containers.dockerCredentialHelper": false,
-        "dev.containers.gitCredentialHelperConfigLocation": "none",
-        "dev.containers.copyGitConfig": false,
-        "dev.containers.mountWaylandSocket": false,
-        "dev.containers.forwardWSLServices": false,
+        // Settings here configure the attached editor. Configure host forwarding
+        // separately in host VS Code user settings; see docs/hardening.md.
+        // Disable automatic port forwarding for this container's editor session.
         "remote.autoForwardPorts": false,
         "workbench.colorCustomizations": {
           "titleBar.activeBackground": "#009e15",
@@ -79,7 +75,9 @@
     }
   },
   "containerEnv": {
-    // Suppress automatic X11 relay creation before IDE attachment. Empty is insufficient.
+    // X11 is separate from Wayland. In Dev Containers 0.469.0, a nonempty
+    // DISPLAY before attach suppresses automatic X11 relay creation.
+    // Host Wayland settings and actual socket checks are documented in docs/hardening.md.
     "DISPLAY": "disabled",
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "GOTELEMETRY": "off"
