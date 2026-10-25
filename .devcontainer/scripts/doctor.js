@@ -27,9 +27,12 @@ identity enforcement. Only small temporary write probes are created and removed.
 
 Exit: 0 = no failures; 1 = failures (or strict warnings); 2 = invalid arguments.
 No real credential helper is invoked unless --credential-fixture is supplied.
-To accept particular socket findings, run on the host:
-  python3 .devcontainer/host/allow-sockets.py PROJECT
+To acknowledge socket risk in doctor diagnostics only (FAIL to WARN), run on
+the host from the project root:
+  python3 .devcontainer/host/acknowledge-doctor-socket-risk.py
+This command acts only on its own project and accepts no target-path argument.
 Paste exact socket paths or doctor finding lines, then type approve to save.
+Socket access and runtime security controls remain unchanged.
 `;
 
 function parseOptions(args) {
@@ -424,7 +427,7 @@ class Doctor {
       this.add('Security preflight', 'preflight.' + group.name, status,
         `${group.name}: ${group.pass} passed, ${group.fail} failed, ${group.warn} warnings`,
         status === 'fail' || status === 'warn' ? group.name.startsWith('Host integrations') ?
-          'Inspect the socket paths. To accept selected exposures, run python3 .devcontainer/host/allow-sockets.py PROJECT on the host, paste the paths, and type approve. Other failures remain strict.' :
+          'Review the socket paths. From the project root on the host, run python3 .devcontainer/host/acknowledge-doctor-socket-risk.py to record diagnostic risk acceptance (FAIL to WARN only). Socket access remains unchanged; other failures remain strict.' :
           'Run /opt/scripts/security-preflight.sh locally for detailed checks; review output before sharing.' : undefined, group.details);
     }
     const outcome = preflightOutcome(result, parsed);

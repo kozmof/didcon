@@ -12,7 +12,7 @@ import unittest
 
 from test_prepare import ROOT, prepare
 
-SPEC = importlib.util.spec_from_file_location('socket_approvals', ROOT / '.devcontainer/host/allow-sockets.py')
+SPEC = importlib.util.spec_from_file_location('socket_approvals', ROOT / '.devcontainer/host/acknowledge-doctor-socket-risk.py')
 approvals = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(approvals)
 
@@ -21,20 +21,48 @@ class SocketApprovalTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='didcon-approvals-')
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name) / 'project'
+        self.root = Path(self.temporary.name) / 'project with spaces'
         self.root.mkdir()
         self.env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
         self.env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull, DEVCONTAINER='false')
         subprocess.run(['git', 'init', '-q', str(self.root)], env=self.env, check=True)
         (self.root / '.devcontainer').mkdir()
         shutil.copy(ROOT / '.devcontainer/devcontainer.json', self.root / '.devcontainer/devcontainer.json')
+        shutil.copytree(ROOT / '.devcontainer/host', self.root / '.devcontainer/host',
+                        ignore=shutil.ignore_patterns('__pycache__'))
         with contextlib.redirect_stdout(io.StringIO()):
             prepare.configure(self.root, None, 'bind', 'proxy')
         self.filename = self.root / '.devcontainer/socket-allowlist.json'
+        self.script = self.root / '.devcontainer/host/acknowledge-doctor-socket-risk.py'
 
-    def run_cli(self, text='', *arguments, env=None):
-        return subprocess.run(['python3', str(ROOT / '.devcontainer/host/allow-sockets.py'), str(self.root), *arguments],
+    def run_cli(self, text='', *arguments, env=None, cwd=None):
+        return subprocess.run(['python3', str(self.script), *arguments], cwd=cwd or self.root,
                               input=text, env=env or self.env, capture_output=True, text=True)
+
+    def test_command_requires_its_own_project_root(self):
+        nested = self.root / 'nested'
+        nested.mkdir()
+        other = Path(self.temporary.name) / 'other project'
+        shutil.copytree(self.root, other)
+        with contextlib.redirect_stdout(io.StringIO()):
+            prepare.configure(other, None, 'bind', 'proxy')
+            prepare.verify(other)
+        for directory in (nested, self.script.parent, self.root.parent, other):
+            with self.subTest(cwd=directory):
+                result = self.run_cli('/tmp/test.sock\n\napprove\n', cwd=directory)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn('from its project root', result.stderr)
+                self.assertIn(str(self.root), result.stderr)
+                self.assertFalse(self.filename.exists())
+                self.assertFalse((other / '.devcontainer/socket-allowlist.json').exists())
+
+    def test_target_path_argument_is_rejected_without_changing_acknowledgments(self):
+        self.filename.write_text('{"version":1,"sockets":["/tmp/existing.sock"]}')
+        original = self.filename.read_bytes()
+        result = self.run_cli('/tmp/new.sock\n\napprove\n', str(self.root))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('unrecognized arguments', result.stderr)
+        self.assertEqual(self.filename.read_bytes(), original)
 
     def test_explicit_confirmation_adds_lists_revokes_and_clears_exact_paths(self):
         paste = '- Socket reachable or isolation unverified: "/tmp/vscode-ipc-test.sock"\n/tmp/.X11-unix/X0\n\n'
@@ -50,7 +78,7 @@ class SocketApprovalTests(unittest.TestCase):
         self.assertEqual(set(json.loads(self.filename.read_text())['sockets']), expected)
         listed = self.run_cli('', '--list')
         self.assertEqual(listed.returncode, 0, listed.stderr)
-        self.assertIn('2 approved socket paths', listed.stdout)
+        self.assertIn('2 acknowledged socket paths', listed.stdout)
         before = self.filename.read_bytes()
         self.assertEqual(self.run_cli(paste).returncode, 0)
         self.assertEqual(before, self.filename.read_bytes())

@@ -150,12 +150,19 @@ requires a workflow without those editor integrations.
 ### Approving individual socket exposures
 
 To retain selected integrations, first run `didcon-doctor` and review the failed
-socket paths. On the **host**, run this from the didcon checkout or use the
-script installed in the target project:
+socket paths. On the **host**, open a terminal at the prepared project's root
+and run the script installed in that project:
 
 ```sh
-python3 .devcontainer/host/allow-sockets.py /path/to/project
+python3 .devcontainer/host/acknowledge-doctor-socket-risk.py
 ```
+
+The name makes its purpose explicit: acknowledgment changes doctor diagnostics
+only. The startup explanation describes FAIL-to-WARN reporting, continued
+connection probes, and unchanged socket access and runtime controls before the
+paste prompt.
+The command acts only on its own project. It rejects other working directories
+and target-path arguments; it does not search parent directories for a project.
 
 Paste the selected doctor finding lines or absolute socket paths, one per line.
 For example, these are accepted input formats:
@@ -173,12 +180,12 @@ blanket IDE exception and no wildcard matching. UUID paths recreated on reconnec
 need fresh approval. Display and agent sockets can also be accepted explicitly;
 review the service they expose before approving them.
 
-Manage approvals on the host:
+Manage approvals from the same project root on the host:
 
 ```sh
-python3 .devcontainer/host/allow-sockets.py /path/to/project --list
-python3 .devcontainer/host/allow-sockets.py /path/to/project --remove
-python3 .devcontainer/host/allow-sockets.py /path/to/project --clear
+python3 .devcontainer/host/acknowledge-doctor-socket-risk.py --list
+python3 .devcontainer/host/acknowledge-doctor-socket-risk.py --remove
+python3 .devcontainer/host/acknowledge-doctor-socket-risk.py --clear
 ```
 
 Removal accepts pasted paths and asks for the same confirmation. Clear asks for

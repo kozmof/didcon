@@ -333,11 +333,17 @@ didcon sets `DISPLAY=disabled` before attach to suppress its automatic relay in
 Dev Containers 0.469.0. See the guide for the WSL forwarding limits and verify
 actual connections after recreation/reconnect.
 
-To accept selected socket exposures, run on the **host**:
+To accept selected socket exposures, run on the **host** from the prepared
+project's root using that project's script:
 
 ```sh
-python3 .devcontainer/host/allow-sockets.py /path/to/project
+python3 .devcontainer/host/acknowledge-doctor-socket-risk.py
 ```
+
+This records diagnostic risk acceptance only. Socket access, permissions,
+forwarding, and sandbox controls remain unchanged. The command explains this
+before asking for paths and confirmation.
+It accepts no target-path argument and rejects execution from other directories.
 
 Paste the selected doctor socket findings or exact paths, finish with an empty
 line, review the list, and type `approve`. Rerun doctor: approved sockets become

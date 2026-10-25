@@ -308,11 +308,18 @@ that real host credentials are unavailable after IDE attachment.
 
 ## Approve selected exposures
 
-First review the failed paths and their services. On the **host**, run:
+First review the failed paths and their services. On the **host**, run the
+project's own script from that prepared project's root:
 
 ```sh
-python3 .devcontainer/host/allow-sockets.py /path/to/project
+python3 .devcontainer/host/acknowledge-doctor-socket-risk.py
 ```
+
+The command explains at startup that acknowledgment changes only doctor's
+diagnostics. Socket access, permissions, forwarding, firewall rules, and sandbox
+restrictions remain unchanged. This explanation appears before any path input.
+The current directory must be the root of the project containing this script.
+Other working directories and target-path arguments are rejected.
 
 Paste only the selected finding lines or absolute paths, one per line:
 
@@ -326,12 +333,12 @@ save. Any other response or EOF cancels changes. Rerun doctor in the container.
 Approved exposed paths become warnings; unlisted exposed paths remain failures.
 `didcon-doctor --strict` returns a failure when warnings remain.
 
-Manage the same policy on the host:
+Manage the same policy from that project root on the host:
 
 ```sh
-python3 .devcontainer/host/allow-sockets.py /path/to/project --list
-python3 .devcontainer/host/allow-sockets.py /path/to/project --remove
-python3 .devcontainer/host/allow-sockets.py /path/to/project --clear
+python3 .devcontainer/host/acknowledge-doctor-socket-risk.py --list
+python3 .devcontainer/host/acknowledge-doctor-socket-risk.py --remove
+python3 .devcontainer/host/acknowledge-doctor-socket-risk.py --clear
 ```
 
 Removal accepts pasted paths; removal and clear require confirmation. Revoking
@@ -361,7 +368,7 @@ The policy has these properties:
 The tool verifies the prepared project's host configuration before saving. It
 does not automatically approve paths discovered by doctor. The container cannot
 write the policy through the intended read-only control mount.
-[Host approval tool](../host/allow-sockets.py),
+[Host approval tool](../host/acknowledge-doctor-socket-risk.py),
 [policy loader](../scripts/socket-allowlist.js).
 
 ## Evidence and remaining uncertainty

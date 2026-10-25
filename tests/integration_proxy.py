@@ -70,8 +70,8 @@ def main():
                 compose(*socket_test, 'initial')
 
                 def approve(text, *arguments):
-                    result = subprocess.run(['python3', str(ROOT / '.devcontainer/host/allow-sockets.py'), str(root), *arguments],
-                                            input=text, env=env, capture_output=True, text=True)
+                    result = subprocess.run(['python3', '.devcontainer/host/acknowledge-doctor-socket-risk.py', *arguments],
+                                            cwd=root, input=text, env=env, capture_output=True, text=True)
                     if result.returncode:
                         raise AssertionError('Host socket approval failed: ' + result.stderr)
 

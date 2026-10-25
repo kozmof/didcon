@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Approve exact doctor socket findings on the host after review and confirmation.
-
-Approvals accept diagnostic risk; they do not change socket permissions or
-network rules. The container reads this file through its read-only control mount.
-"""
+"""Record socket risk acceptance for doctor diagnostics only."""
 import argparse
 from datetime import datetime, timezone
 import json
@@ -18,6 +14,19 @@ from prepare import PreparationError, checked_path, verify
 
 FILENAME = 'socket-allowlist.json'
 MAX_BYTES = 128 * 1024
+EXPLANATION = """Doctor socket risk acknowledgment — diagnostics only
+
+Run on the host from this project's root. This command acts only on that project
+and accepts no target-path argument.
+
+This command records your acceptance of exact socket exposures in didcon-doctor.
+Acknowledged exposed paths change from FAIL to WARN; connection probes still run.
+Socket access, permissions, forwarding, firewall rules, and sandbox restrictions
+remain unchanged. Normal doctor can exit 0 if no other failures remain;
+--strict still fails on warnings.
+Removing an acknowledgment restores diagnostic failures for exposed paths;
+the socket remains accessible as before.
+"""
 
 
 def socket_path(value):
@@ -88,17 +97,21 @@ def write_policy(filename, entries, original):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('project', nargs='?', type=Path, default=Path(__file__).resolve().parents[2])
+    parser = argparse.ArgumentParser(description=EXPLANATION,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     actions = parser.add_mutually_exclusive_group()
-    actions.add_argument('--list', action='store_true', help='List approved paths without changing them')
-    actions.add_argument('--remove', action='store_true', help='Paste paths to revoke instead of adding them')
-    actions.add_argument('--clear', action='store_true', help='Revoke all approved paths after confirmation')
+    actions.add_argument('--list', action='store_true', help='List diagnostic socket risk acknowledgments')
+    actions.add_argument('--remove', action='store_true', help='Paste paths whose risk acknowledgments should be removed')
+    actions.add_argument('--clear', action='store_true', help='Remove all risk acknowledgments after confirmation')
     args = parser.parse_args(argv)
+    print(EXPLANATION, flush=True)
     try:
         if os.environ.get('DEVCONTAINER') == 'true':
             raise ValueError('Run approval on the host; the container must not approve its own sockets')
-        root = args.project.resolve()
+        root = Path.cwd().resolve()
+        project_root = Path(__file__).resolve().parents[2]
+        if root != project_root:
+            raise ValueError(f'Run this command from its project root on the host: {project_root}')
         control = checked_path(root, '.devcontainer', 'directory')
         if not args.list and (not os.access(control, os.W_OK) or os.statvfs(control).f_flag & os.ST_RDONLY):
             raise ValueError('Host control directory is read-only; run this command on the host')
@@ -106,11 +119,11 @@ def main(argv=None):
         filename = control / FILENAME
         current, original = read_policy(filename)
         print('Project:', root)
-        print('Approval file:', filename)
+        print('Diagnostic acknowledgment file:', filename)
         if args.list:
             for value in sorted(current):
                 print(json.dumps(value))
-            print(f'{len(current)} approved socket paths')
+            print(f'{len(current)} acknowledged socket paths')
             return 0
         requested = set()
         if not args.clear:
@@ -134,18 +147,19 @@ def main(argv=None):
             return 0
         added, removed = updated - current, current - updated
         for value in sorted(added):
-            print('APPROVE:', json.dumps(value))
+            print('ACKNOWLEDGE RISK (FAIL to WARN):', json.dumps(value))
         for value in sorted(removed):
-            print('REVOKE:', json.dumps(value))
+            print('REMOVE ACKNOWLEDGMENT (exposed paths return to FAIL):', json.dumps(value))
         print('Approved sockets remain reachable and may provide credentials, display access, or editor actions.')
         print('Doctor will report approved exposure as WARN; --strict will still fail on warnings.')
         print('Only these exact paths are accepted. New or renamed sockets fail until separately approved.')
-        print('Type approve to save, or anything else to cancel: ', end='', flush=True)
+        print('Type approve to save these diagnostic risk acknowledgments, or anything else to cancel: ', end='', flush=True)
         if sys.stdin.readline().strip() != 'approve':
             print('Cancelled; no approvals changed')
             return 1
         write_policy(filename, updated, original)
-        print(f'Saved {len(updated)} exact socket approvals. Rerun didcon-doctor; no rebuild is needed for approval changes.')
+        print(f'Saved {len(updated)} exact socket risk acknowledgments. Socket access remains unchanged.')
+        print('Rerun didcon-doctor; no rebuild is needed for acknowledgment changes.')
         return 0
     except (PreparationError, OSError, ValueError, TypeError) as error:
         print('[didcon] ' + str(error), file=sys.stderr)
