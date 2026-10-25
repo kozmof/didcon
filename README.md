@@ -1,7 +1,6 @@
 # didcon
 
-didcon adds file and network restrictions to a development container. It includes
-sandboxed command-line tools, protected host configuration, and a TLS-inspecting proxy.
+A minimum defence in depth devcontainer
 
 ## Usage
 
