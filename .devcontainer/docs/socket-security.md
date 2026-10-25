@@ -1,19 +1,19 @@
 # VS Code and host socket security
 
-Use this guide to review reachable editor and host integration sockets. The 2026-10-24
-observations used VS Code 1.142.0 and Dev Containers 0.469.0 on Windows/WSL2 with Docker
-Desktop. Recheck forwarding after version or settings changes.
+Review reachable editor and host integration sockets with this guide. Its recorded
+checks used VS Code 1.142.0 and Dev Containers 0.469.0 on Windows/WSL2 with Docker Desktop
+on 2026-10-24. Recheck forwarding after version or settings changes.
 
 Reachable integration sockets let container processes contact editor,
 credential, display, or other services. Some are expected during normal VS Code
 use. Their security impact depends on the service's authority and protocol,
 including authentication and permission checks.
 
-A socket FAIL reports reachability or unverified isolation. Credential theft, desktop
-access, and host command execution require separate evidence. Approving a path accepts
-the reported exposure and leaves the endpoint’s access unchanged. The risk scenarios
-below are inferences from service capabilities, not confirmed exploits against the
-attached container.
+A socket FAIL means the checker reached an endpoint or could not verify isolation.
+Credential theft, desktop access, and host command execution require separate evidence.
+Approving a path accepts the reported exposure and leaves endpoint access unchanged.
+The risk scenarios below are inferred from service capabilities. They have not been
+confirmed as exploits against the attached container.
 
 - [Scope and threat model](#scope-and-threat-model)
 - [Interaction with didcon protections](#interaction-with-didcon-protections)
@@ -56,8 +56,8 @@ flowchart LR
     P --> N["Allowed network destinations"]
 ```
 
-The diagram describes separate communication paths, not a claim that every
-socket reaches the host or permits arbitrary commands.
+The diagram shows the two communication paths. A socket's destination and permitted
+actions depend on the listening service.
 
 | Existing control | What it does for this risk |
 | --- | --- |
@@ -70,11 +70,11 @@ socket reaches the host or permits arbitrary commands.
 | Socket approval file | Changes the diagnostic treatment of exact paths. It does not change socket permissions, service methods, authentication, or network rules. |
 
 Landlock behavior depends on both kernel support and the rights actually handled by the
-sandbox. The observed host exposed ABI 3. A newer kernel alone does not establish socket
-isolation. Verify the enforced rights and test actual connection denial before claiming
-that protection.
+sandbox. Run `didcon-doctor` in the target container to measure its kernel's ABI. Current
+profiles request ABI 6. Verify the enforced rights and test actual connection denial
+before claiming socket isolation.
 [Landlock documentation](https://docs.kernel.org/userspace-api/landlock.html),
-[didcon validation record](hardening-validation.md#container-doctor-2026-10-24).
+[kernel ABI recheck](hardening-validation.md#kernel-abi-recheck-2026-10-25).
 
 ## Socket inventory and risks
 
@@ -91,10 +91,10 @@ approval rules. Socket names and locations can change on reconnect.
 
 ### Editor CLI sockets
 
-The upstream VS Code CLI server accepts requests to open files/folders, open external
-URIs, report status, and manage extensions. This explains why the endpoint should be
-treated as a control interface. Feature availability and the local/remote target still
-depend on the running implementation.
+The upstream VS Code CLI server accepts requests to open files and folders, open
+external URIs, report status, and manage extensions. Treat it as a control interface.
+The available features and whether they target the local or remote session depend on
+the running implementation.
 [VS Code CLI server source](https://github.com/microsoft/vscode/blob/main/src/vs/workbench/api/node/extHostCLIServer.ts).
 
 An inferred risk is that untrusted code requests an editor or external-browser action
@@ -111,10 +111,10 @@ The inspected Dev Containers extension creates a container helper endpoint and s
 consequences depend on the helper methods, forwarding settings, and host components
 participating in the bridge.
 
-The attached-container checks established reachability, not a complete inventory of
-callable host operations. Host command execution and credential retrieval through this
-bridge remain unverified. Review the installed version's handlers before attributing
-either capability to a particular listener.
+The attached-container checks established reachability. The full set of callable host
+operations, host command execution, and credential retrieval through the bridge remain
+unverified. Review the installed version's handlers before attributing those
+capabilities to a listener.
 [Local inspection and validation](hardening-validation.md#rebuild-follow-up-separate-wsl-forwarding-control-2026-10-24).
 
 ### Git integration sockets
@@ -182,8 +182,10 @@ used to open the container.
 
 The host extension reads the five `dev.containers.*` settings from that host profile.
 Container customizations supply defaults for the attached editor.
-`remote.autoForwardPorts: false` also belongs there because it controls the editor
-session. It disables automatic TCP port forwarding without filtering Unix sockets. See
+Set `remote.autoForwardPorts` to `false` for the editor session as well. The template
+includes this default in its container customizations. Setting it in the host profile
+also applies it to other remote sessions. It disables automatic TCP port forwarding
+without filtering Unix sockets. See
 the [Dev Containers settings specification](https://containers.dev/supporting.html).
 
 Setup and patching update project files. Apply host user settings separately. Remove
@@ -210,9 +212,9 @@ The workspace loses the editor’s Git integration. Continue using the installed
 `git` command when needed.
 [VS Code extension management](https://code.visualstudio.com/docs/configure/extensions/extension-marketplace#disable-an-extension).
 
-`git.terminalAuthentication: false` and `git.useIntegratedAskPass: false` reduce
-authentication integration. They should not be treated as listener-removal controls. IPC
-server creation is separate from askpass environment injection. Restart and test actual
+Setting `git.terminalAuthentication` and `git.useIntegratedAskPass` to `false` reduces
+authentication integration. IPC server creation is separate from askpass environment
+injection, so these settings do not establish listener removal. Restart and test actual
 reachability after changing the integration.
 [Git extension initialization](https://github.com/microsoft/vscode/blob/main/extensions/git/src/main.ts).
 
@@ -251,10 +253,11 @@ node /opt/scripts/host-integration-check.js --socket /path/to/known/socket
 Use `didcon-doctor --offline` when external requests are unavailable. It retains local
 socket checks and marks live egress coverage incomplete.
 
-The socket probe attempts a Unix stream connection and closes it. It sends no Git,
-editor, display, or agent protocol requests. The default integration check also inspects
-mounts and Git credential-helper configuration. Credential fill requires the separate
-explicit fixture option. [Checker implementation](../scripts/host-integration-check.js).
+The [socket probe](../scripts/host-integration-check.js) attempts a Unix stream
+connection and closes it. It sends no Git, editor, display, or agent protocol requests.
+The default integration check also inspects mounts and Git credential-helper
+configuration. Invoking a credential helper requires the separate explicit fixture
+option.
 
 | Finding | Meaning | What it does not prove |
 | --- | --- | --- |
@@ -323,10 +326,10 @@ findings did not identify every listener as necessary for attachment. A missed W
 bind mount was subsequently detected after fixing discovery. A host-setting change
 followed by recreation removed that mount.
 
-The X11 startup guard was verified against the installed extension's relay-
-creation decision. That evidence is narrower than actual connection denial
-after a fresh attach/reconnect. Real credential unavailability and the complete
-set of host operations exposed through editor bridges remain unverified.
+The X11 startup guard was verified against the installed extension's decision to create
+a relay. Actual connection denial after a fresh attachment or reconnect remains
+unverified. Real credential unavailability and the complete set of host operations
+exposed through editor bridges also remain unverified.
 
 Disposable container tests verified selective approval, continued failure for unlisted
 display paths, explicit display approval, probes outside normal discovery, strict

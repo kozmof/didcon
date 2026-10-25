@@ -1,14 +1,14 @@
 # Language variants
 
-Choose a language variant during setup to add a toolchain to the Node image. Use this
-guide for variant-specific build settings, cache paths, and workflows. See
+Choose a language variant during setup to add a toolchain to the Node image. This guide
+covers build settings, cache paths, and tool workflows for each variant. See
 [version updates](version-bumps.md) to change the installed versions.
 
 ## Build configuration
 
-`setup.sh` writes the Dockerfile selection. In proxy mode, the reviewed settings live in
-`didcon-manifest.json` and the build runs through `compose.generated.json`. Startup
-checks the generated configuration.
+`setup.sh` records the selected Dockerfile. In proxy mode, the reviewed build settings
+live in `.devcontainer/didcon-manifest.json` and the build runs through
+`.devcontainer/compose.generated.json`. Startup checks the generated configuration.
 
 The Blender Dockerfile is in a subdirectory. When configuring the source template
 manually, set the build context to `.devcontainer` with the following `build` object in
@@ -26,7 +26,8 @@ manually, set the build context to `.devcontainer` with the following `build` ob
 
 Setup writes both `dockerfile` and `context` when selecting Blender. Without the
 context, the build uses the Dockerfile's directory and cannot copy files such as
-`extra-whitelist.conf`. For a manual image build, run from the repository root.
+`extra-whitelist.conf`. For a manual image build, run this command from the repository
+root.
 
 ```sh
 docker build --pull -f .devcontainer/specific-tool-dockerfile/blender/Dockerfile.withBlender .devcontainer
@@ -34,10 +35,10 @@ docker build --pull -f .devcontainer/specific-tool-dockerfile/blender/Dockerfile
 
 ## Shared cache behavior
 
-Tool profiles place caches and writable tool state under `/workspace` so nested agent
-and tool sandboxes can access them. A child Landlock sandbox can only retain or reduce
-its parent's permissions. Redirecting paths avoids granting agents access to unrelated
-home directories.
+Tool profiles place caches and writable tool state under `/workspace` so nested tool
+sandboxes can use paths permitted by their parent agents. A child Landlock sandbox can
+only retain or reduce its parent's permissions. These shared paths avoid granting
+agents access to unrelated home directories.
 
 | Tool | Variable or default | Path |
 | --- | --- | --- |
@@ -52,8 +53,8 @@ home directories.
 | uv | `UV_TOOL_BIN_DIR` | `/workspace/.uv-tools/bin` |
 
 These paths persist with the host checkout in bind mode and the named workspace volume
-in volume mode. In bind mode, their contents are visible on the host unless covered by a
-separate dependency volume. Treat executable caches as untrusted. See
+in volume mode. Bind-mode caches are visible on the host unless covered by a separate
+dependency volume. Treat executable caches as untrusted. See
 [dependency volumes](hardening.md#bind-mode-protection-and-dependency-volumes).
 
 Add the paths used by your variant to the project's `.gitignore`.
@@ -122,8 +123,8 @@ Run addon tests through the Blender shim.
 blender -b --factory-startup --python tests/run.py
 ```
 
-For editor tooling, create a Python 3.11 environment to match the bundled Blender
-interpreter and install the pinned API stubs.
+For editor tooling, create a Python 3.11 environment to match the pinned Blender 4.5
+interpreter and install the API stubs.
 
 ```sh
 uv venv --python 3.11
@@ -163,9 +164,9 @@ and `uv build`. It does not force those flags on `uv add`, `uv lock`, `uv sync`,
 `uv run`. Use a reviewed `uv.lock` for project workflows. `/etc/uv/blender-stubs.txt`
 shows the pinned requirement and artifact-hash format.
 
-Hash-checking mode rejects editable and Git installs. The documented full-path bypass is
-`/usr/local/uv/uv`, which skips the uv-specific sandbox and its profile settings. An
-outer agent sandbox still applies. Use this only for reviewed work. In the recorded uv
+Hash-checking mode rejects editable and Git installs. Running `/usr/local/uv/uv` directly
+skips the uv-specific sandbox and its profile settings. An outer agent sandbox still
+applies. Use the direct path only for reviewed work. In the recorded uv
 0.12.17 checks, `--no-require-hashes` conflicted with the profile-provided setting, and
 caller `UV_REQUIRE_HASHES=0` was replaced by the profile's literal value.
 

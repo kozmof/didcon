@@ -2,10 +2,11 @@
 
 ## Executive summary
 
-Phases 1–3 implement protected host configuration, volume workspaces with reviewed
-exports, and external TLS-inspecting egress. Node image and disposable integration
-checks have passed. Broader IDE, authenticated agent, non-Node, storage, and scratch
-compatibility checks remain open. Use the [task checklist](harden-1-checklist.md) and
+Phases 1–3 protect host configuration, add volume workspaces with reviewed exports, and
+route external traffic through a TLS-inspecting proxy. Node image and disposable
+integration checks have passed. Broader IDE, authenticated agent, non-Node, storage, and
+temporary-file compatibility checks remain open. Use the
+[task checklist](harden-1-checklist.md) and
 [validation record](.devcontainer/docs/hardening-validation.md) to assess completion.
 
 The 2026-10-24 proxy checkpoint uses Smokescreen commit
@@ -16,18 +17,18 @@ an HTTP/1.1 CONNECT compatibility change for safe-chain. Follow the
 [migration procedure](.devcontainer/docs/hardening.md#tls-inspecting-egress) when
 updating an installation.
 
-The remaining priorities are host credential and socket denial after IDE attachment,
-complete tool workflows, persistent storage limits, and compatible narrower
-temporary-file grants. A separate
+The remaining priorities are verifying host credential and socket denial after IDE
+attachment, testing complete tool workflows, enforcing persistent storage limits, and
+reducing temporary-file permissions without breaking tools. A separate
 [package isolation plan](.devcontainer/docs/package-isolation-plan.md) proposes stronger
 separation of editor, agent, and dependency execution. Kata evaluation is deferred until
 a Linux/KVM host can validate it.
 
-This report draws on the local [didcon repository](https://github.com/kozmof/didcon),
-upstream documentation, and Kata Containers 4.2.0 source. The original review was
-updated on 2026-10-24. The risk tables below describe the earlier bind-workspace and
-in-container firewall baseline where stated. Implementation status and measured results
-belong in the linked validation record.
+This report draws on the [didcon source](https://github.com/kozmof/didcon), upstream
+documentation, and Kata Containers 4.2.0 source. The original review was updated on
+2026-10-24. Where stated, the risk tables describe the earlier bind-workspace and
+in-container firewall baseline. Consult the validation record for dated implementation
+results and remaining checks.
 
 ## Current defense layers
 
@@ -85,8 +86,9 @@ The baseline review identified four risks outside the original filesystem tests.
 | Shared-IP egress | IP allowlists can admit other tenants on a permitted CDN address. In-container root can rewrite local rules. | Default proxy mode checks CONNECT/SNI/Host and uses external network enforcement. Approved destinations can still receive uploads. |
 | Writable host checkout | Bind mode shares project content with the host. | Volume mode provides reviewed exports. Bind-mode source and scripts remain writable. |
 
-Pathname socket restrictions require Landlock ABI 9's `LANDLOCK_ACCESS_FS_RESOLVE_UNIX`, compatible userspace enforcement, and suitably narrow rules. Verify actual connections
-before claiming isolation.
+Pathname socket restrictions require Landlock ABI 9's
+`LANDLOCK_ACCESS_FS_RESOLVE_UNIX`, compatible userspace enforcement, and suitably narrow
+rules. Verify actual connection denial before claiming isolation.
 [Landlock documentation](https://docs.kernel.org/userspace-api/landlock.html).
 
 ## Host impact beyond file changes
@@ -164,7 +166,7 @@ project-specific dependency volumes and bounded scratch. Route normal npm/npx an
 supported app/test launches through shims. Run mount, connection, and dummy credential
 checks after integrations are established.
 
-Acceptance requires both denied protected operations and working Git/tool workflows.
+Acceptance requires denial of protected operations and working Git and tool workflows.
 Verify missing-path creation, root placeholder selection, ownership, storage limits, and
 behavior after IDE reconnect. Follow the
 [operational guide](.devcontainer/docs/hardening.md) for settings and commands.
@@ -193,16 +195,17 @@ proxy route. Test direct IP, IPv6, Docker DNS, host-service, and alternate proxy
 attempts. Removing proxy environment values must not create a fallback path. Drop
 NET_ADMIN/NET_RAW from the development container.
 
-A CONNECT allowlist alone does not check encrypted SNI or HTTP authority. Require TLS
-inspection with matching CONNECT/SNI/Host, verified upstream certificates, public
-destination-address validation, and pinned upstream connections. The
+A CONNECT allowlist alone does not check the TLS server name or decrypted HTTP
+authority. Require TLS inspection with matching CONNECT/SNI/Host, verified upstream
+certificates, public destination addresses, and connections pinned to validated
+addresses. The
 [Smokescreen implementation](https://github.com/stripe/smokescreen/blob/master/pkg/smokescreen/smokescreen.go)
 distinguishes tunnels from inspection rules.
 
-Verify CA isolation, failure denial, DNS rebinding behavior, and compatibility with each
-agent, package manager, Git transport, debugger, and extension. Proxy environment
-settings alone cannot prove routing enforcement. TLS trust and certificate-pinned
-clients require explicit compatibility checks.
+Verify CA isolation, continued denial on failure, DNS rebinding behavior, and
+compatibility with each agent, package manager, Git transport, debugger, and extension.
+Proxy environment settings alone cannot prove routing enforcement. TLS trust and
+certificate-pinned clients require explicit compatibility checks.
 
 ### Phase 4: filtered DNS and narrower temporary-file access
 
@@ -226,9 +229,9 @@ behavior. See the
 
 #### Temporary-file access
 
-Startup creates dev-owned mode-0700 scratch directories under `/tmp/didcon`. Tools and
-herdr share the root. Claude and Codex use subdirectories. This fixes the recorded
-nested-npm denial caused by an inherited agent-home temporary path.
+Startup creates scratch directories under `/tmp/didcon`, owned by `dev` with mode 0700.
+Tools and herdr share the root. Claude and Codex use subdirectories. This fixes the
+recorded nested-npm denial caused by an inherited agent-home temporary path.
 
 Keep the existing `/tmp` grants until all direct and nested tool combinations pass.
 Complete non-Node and actual herdr checks before narrowing them. ABI 6 filesystem rules

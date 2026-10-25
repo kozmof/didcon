@@ -1,6 +1,7 @@
 # didcon
 
-A minimum defence in depth devcontainer
+didcon adds file and network restrictions to a development container. It includes
+sandboxed command-line tools, protected host configuration, and a TLS-inspecting proxy.
 
 ## Usage
 
@@ -17,9 +18,10 @@ git clone https://github.com/kozmof/didcon.git /tmp/didcon
 /tmp/didcon/setup.sh /path/to/your/project
 ```
 
-`setup.sh` asks for a language variant, container name, and workspace mode. The name
-defaults to the project directory's name. The target defaults to the current directory.
-Setup refuses an existing `.devcontainer` directory. Use
+`setup.sh` asks for a language variant, container name, and workspace mode. The container
+name defaults to the project directory's name, with unsupported characters replaced by
+hyphens. Omit the target path to use the current directory. Setup refuses an existing
+`.devcontainer` directory. Use
 [`patch.sh`](#update-an-existing-one-patchsh) to update one.
 
 | Workspace mode | Use | Storage |
@@ -38,8 +40,8 @@ Set `DIDCON_WORKSPACE_MODE` to choose a mode before running setup.
 DIDCON_WORKSPACE_MODE=volume /tmp/didcon/setup.sh /path/to/your/project
 ```
 
-New installations use the external Smokescreen proxy with TLS inspection. Setup
-generates the protected mounts, manifest, and Compose configuration.
+Setup generates protected mounts, a project manifest, and Compose configuration. New
+installations route external traffic through the Smokescreen proxy with TLS inspection.
 
 ### Open in VS Code
 
@@ -105,7 +107,8 @@ didcon-doctor
 
 The doctor checks tools, sandbox configuration, mounts, known integration sockets,
 resource limits, storage, certificate trust, and live proxy enforcement. It creates and
-removes small storage probes. Run with these options when needed.
+removes small storage probes. Use these options for offline checks, structured output,
+or stricter exit status.
 
 ```sh
 didcon-doctor --offline                    # Skip live network checks
@@ -129,7 +132,8 @@ A reachable editor socket is a failure under the default policy. The finding rep
 exposure without establishing credential theft or host execution. Use the
 [socket security guide](.devcontainer/docs/socket-security.md) to review the service and
 disable unnecessary forwarding. To retain selected exposures, follow the
-[host socket approval workflow](.devcontainer/docs/hardening.md#approving-individual-socket-exposures). Approval changes diagnostics from failure to warning and leaves access unchanged.
+[host socket approval workflow](.devcontainer/docs/hardening.md#approving-individual-socket-exposures).
+Approved exposures produce warnings and remain accessible.
 
 For the focused sandbox, registry, mount, and egress checks, run the preflight directly
 as `dev` after post-create installation.
@@ -195,9 +199,15 @@ development writes off the host checkout and exports Git objects for review befo
 checkout. Host credentials and integration sockets need separate checks after IDE
 attachment and reconnect.
 
-Read the [hardening guide](.devcontainer/docs/hardening.md) for setup, reviewed exports,
-storage limits, and remaining risks. The
-[validation record](.devcontainer/docs/hardening-validation.md) lists tested
-configurations and open checks. The
-[package isolation plan](.devcontainer/docs/package-isolation-plan.md) proposes further
-separation of editor, agent, and package execution. That work is pending.
+## Documentation
+
+| Document | Use it to |
+| --- | --- |
+| [Hardening guide](.devcontainer/docs/hardening.md) | Prepare workspaces, configure forwarding, review exports, and check storage limits. |
+| [Socket security](.devcontainer/docs/socket-security.md) | Review socket exposure and the effect of approving a path. |
+| [Language variants](.devcontainer/docs/language-variants.md) | Configure toolchains, caches, and Blender workflows. |
+| [Version updates](.devcontainer/docs/version-bumps.md) | Update tool versions, source pins, and download hashes. |
+| [Validation record](.devcontainer/docs/hardening-validation.md) | Look up dated test results and unresolved checks. |
+| [Security improvement report](harden-1.md) and [task checklist](harden-1-checklist.md) | Review the hardening roadmap and its implementation status. |
+| [Island research report](.devcontainer/docs/island-security-research-report.md) | Read the historical filesystem probes and their limits. |
+| [Package isolation plan](.devcontainer/docs/package-isolation-plan.md) | Review the proposed separation of editor, agent, and package execution. Implementation is pending. |

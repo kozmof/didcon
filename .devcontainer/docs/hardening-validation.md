@@ -1,9 +1,9 @@
 # Hardening validation record
 
-This record preserves hardening checks from 2026-10-24 and later follow-ups. Test
-counts, image identities, versions, and results belong to their stated checkpoints. Use
-the linked scripts to reproduce them against another revision. Keep the planning files
-until the remaining acceptance checks are complete.
+This record documents hardening checks from 2026-10-24 and later follow-ups. Each
+checkpoint records its own test counts, image identities, versions, and results. Use the
+linked scripts to repeat a check against another revision. Keep the planning files until
+the remaining acceptance checks are complete.
 
 ## Environment
 
@@ -19,9 +19,9 @@ until the remaining acceptance checks are complete.
 | Proxy compiler/runtime | Go `1.27.3` / distroless static, UID `1000:1000` |
 | IDE / Dev Containers extension versions | Unrecorded at recovery. See the later attached-IDE checkpoint. |
 
-No `didcon-*` test containers were left running when recovery checked Docker.
-The tests used temporary projects and named volumes and cleaned up their own
-Compose services, networks, and volumes. The crash cause has not been established.
+The recovery inspection found no running `didcon-*` test containers. Tests used
+temporary projects and named volumes and removed their own Compose services, networks,
+and volumes. The crash cause has not been established.
 
 ## Passed checks
 
@@ -45,11 +45,11 @@ Compose services, networks, and volumes. The crash cause has not been establishe
   retained egress denial. Production mount/socket and egress checks passed without an
   attached IDE.
 
-Host tests also cover preparation/upgrade behavior, submodule layout changes,
-unsupported Git layouts, mount aliases, symlink/hardlink rejection, preserved workspace
-volume names across egress migration, and private DNS answer rejection. Private-address
-DNS rejection has unit-fixture coverage. Live DNS rebinding remains outside the
-integration coverage.
+Host tests at this checkpoint also covered preparation and upgrades, submodule layout
+changes, unsupported Git layouts, mount aliases, symlink/hardlink rejection, preserved
+workspace volume names across egress migration, and private DNS answer rejection.
+Private-address DNS rejection has unit-fixture coverage. Live DNS rebinding remains
+outside the integration coverage.
 
 ## Recovery follow-up: credential and Node workflow checks
 
@@ -69,7 +69,7 @@ profiles, and shims.
 python3 tests/integration_proxy.py --image didcon-hardening-test:node --packaged --workflows
 ```
 
-The run verified the following behavior.
+The run recorded the following versions and results.
 
 - CLI versions: Claude Code `2.1.302`, Codex `0.163.0`, npm/npx `11.17.0`, pnpm
   `10.17.1`, and Git `2.55.0`. Agent authentication/API requests were not tested.
@@ -81,7 +81,7 @@ The run verified the following behavior.
   passed by the parent and creating/removing child scratch files. The optional herdr
   multiplexer binary/panes were not installed or exercised.
 - Public Git HTTPS transport through the proxy.
-- Full production preflight: 60 passed, 0 failed, 0 warnings.
+- Production preflight: 60 passed, 0 failed, 0 warnings.
 
 The protected mount, tmpfs, npx, socket, and credential regression suite also
 passed again after the scratch changes. All 25 island TOML files parsed, shell/JS
@@ -89,11 +89,11 @@ syntax checks passed, and the Python suite had 23 passing tests at that checkpoi
 
 ## Smokescreen migration (2026-10-24)
 
-The default sidecar now builds a small didcon wrapper around pinned Smokescreen. The
-build verifies the source archive SHA256, uses upstream vendored dependencies without
-network access during compilation, runs eight Go security tests, and produces a static
-binary in a shell-free distroless runtime. The running proxy has read-only access to the
-CA key volume. Existing combined `mitmproxy-ca.pem` keys are validated and reused.
+At this checkpoint, the default sidecar switched to a small didcon wrapper around pinned
+Smokescreen. The build verifies the source archive SHA256 and compiles upstream vendored
+dependencies without network access. It runs eight Go security tests and produces a
+static binary in a shell-free distroless runtime. The running proxy has read-only access
+to the CA key volume. Existing combined `mitmproxy-ca.pem` keys are validated and reused.
 Development containers receive only the certificate. Unit fixtures verify migration
 preserves the key and certificate, restart is idempotent, and invalid, over-permissive,
 symlinked, or missing keys cannot silently trigger CA replacement.
@@ -119,9 +119,9 @@ python3 tests/integration_proxy.py --image didcon-hardening-test:node --packaged
 python3 tests/integration_proxy.py --image didcon-hardening-test:node --packaged --workflows
 ```
 
-The Node application image is unchanged from the image recorded above. Workflows again
-pass safe-chain installation, npm/npx/pnpm, nested agent-profile scratch, Git HTTPS, and
-60 passed, 0 failed, 0 warnings in the production preflight. Disposable Docker checks
+The Node application image was unchanged from the image recorded above. Workflows again
+passed safe-chain installation, npm/npx/pnpm, nested agent-profile scratch, and Git HTTPS.
+The production preflight recorded 60 passed, 0 failed, 0 warnings. Disposable Docker checks
 run as both dev and root and retain direct IPv4/IPv6, metadata, Docker DNS, private-CA
 isolation, malformed-policy, and stopped-proxy denials. The SNI attack deliberately
 disables client-side certificate verification so it proves enforcement by the proxy.
@@ -134,7 +134,7 @@ Logs: `/tmp/didcon-smokescreen-integration.log` and
 
 ## Container doctor (2026-10-24)
 
-Every Dockerfile variant now installs `didcon-doctor`, its shared JavaScript
+At this checkpoint, every Dockerfile variant included `didcon-doctor`, shared JavaScript
 diagnostics, and a static Landlock ABI probe. The Node image was built and tested as
 `didcon-hardening-test:doctor`, image ID
 `sha256:dafb3160211ea39e2c205781f774de4977116d38398bc463a2e5624d28be5347` on linux/amd64
@@ -150,14 +150,15 @@ docker build --pull -t didcon-hardening-test:doctor -f .devcontainer/Dockerfile 
 python3 tests/integration_proxy.py --image didcon-hardening-test:doctor --packaged --workflows
 ```
 
-The 12 Node tests (eight doctor, four mount checks) and 19 Python tests pass. The
+The 12 Node tests (eight doctor, four mount checks) and 19 Python tests passed. The
 packaged workflow runs the doctor as dev after safe-chain installation and validates its
 JSON report, tools, resource limits, public certificate trust, and live CONNECT/SNI/Host
 enforcement. Its embedded production preflight reports 60 passed, 0 failed, 0 warnings.
 Doctor reports have no failures but retain warnings for documented kernel/profile,
 quota, and test-resource limitations.
 
-The native probe measured Landlock ABI 3. Doctor reported warnings for missing ABI 6
+At the 2026-10-24 checkpoint, the native probe measured Landlock ABI 3 on the recorded
+`6.6.87.2-microsoft-standard-WSL2` kernel. Doctor reported warnings for missing ABI 6
 features and the profiles’ pathname Unix-socket limitation. Offline mode marks live
 coverage incomplete. Strict mode rejects warnings. Insecure TLS environment overrides
 and URL-specific Git TLS settings produce failures. Root execution returns a failing,
@@ -231,14 +232,14 @@ suppressed. A normal failing preflight is no longer counted twice. An incomplete
 still receives an overall failure for timeouts, missing summaries, truncated output, or
 unexplained exit status.
 
-Sixteen Node tests and 19 Python tests pass, including structured-finding redaction and
+Sixteen Node tests and 19 Python tests passed, including structured-finding redaction and
 the distinction between reported failures and incomplete runs. The updated focused
 checker also reproduced the remaining live socket findings in structured mode without
 modifying the container or sending protocol requests. The strict editor-IPC policy
 retains those failures. Listeners created during attachment require changes to their
 service or forwarding rather than build cache.
 
-All 16 diagnostic Node tests also pass in the user's running container runtime. The
+All 16 diagnostic Node tests also passed in the user's running container runtime. The
 mount fixture now includes the proxy trust mount and explicitly tests its read-only
 requirement, so these tests work when `DIDCON_EGRESS_MODE=proxy` is inherited. The three
 updated diagnostic scripts were copied to `didcon-test` after checking them against the
@@ -249,7 +250,7 @@ The final packaged workflow passed with `didcon-hardening-test:host-diagnostics`
 by layering the updated scripts onto the previously tested Node doctor image. It
 verified all 60 production preflight checks, live TLS enforcement, offline/strict modes,
 safe credential details, and exactly one failed doctor check for the exposed dummy
-fixture. Logs: `/tmp/didcon-host-diagnostics-build.log` and
+fixture. The logs were `/tmp/didcon-host-diagnostics-build.log` and
 `/tmp/didcon-host-diagnostics-workflows.log`. The active attached test container was
 not restarted or modified by these fixture runs.
 
@@ -262,7 +263,7 @@ reachable paths produce warnings. Other checks retain their normal failure behav
 policy is local to each project, excluded from image contexts and fresh setup copies,
 and preserved by patching.
 
-All 22 Node tests and 25 Python tests pass. They cover structured diagnostics,
+All 22 Node tests and 25 Python tests passed. They covered structured diagnostics,
 redaction, mounted-socket discovery, strict defaults, literal matching, both
 control-mount locations, writable shadow mounts, invalid/aliased policies,
 confirmation, listing/revocation, concurrent changes, and distribution behavior.
@@ -300,7 +301,7 @@ evidence than free space or quota-related mount flags. JSON reports include
 byte/inode bounds when available. Host mount sources and overlay configuration are
 excluded.
 
-All 31 Node tests and 27 Python tests pass. The storage regressions cover
+All 31 Node tests and 27 Python tests passed. The storage regressions covered
 symlinks, escaped paths, writable dependency submounts, hidden mounts after a
 parent overmount, malformed/unavailable evidence, and false positives from
 ordinary filesystem capacity or quota flags. When all inspected locations have
@@ -315,11 +316,12 @@ workflows, and socket acknowledgment/revocation fixtures. Its storage assertions
 verified the real `/tmp` byte cap and the workspace's unverified quota status.
 
 Evidence logs were `/tmp/didcon-storage-limits-build.log` and
-`/tmp/didcon-storage-limits-workflows.log`. Reproduce the checks with
-`tests/test_storage_limits.js`, `tests/integration_storage_limits.js`, and the
-packaged workflow harness. The fixture containers and volumes were removed. Persistent
-quota enforcement, host storage consumers, and other writable paths outside the
-inspected locations still require separate verification.
+`/tmp/didcon-storage-limits-workflows.log`. Repeat the checks with
+[`tests/test_storage_limits.js`](../../tests/test_storage_limits.js),
+[`tests/integration_storage_limits.js`](../../tests/integration_storage_limits.js), and
+the packaged workflow harness. The fixture containers and volumes were removed.
+Persistent quota enforcement, host storage consumers, and other writable paths outside
+the inspected locations still require separate verification.
 
 ## Claude startup hostname (2026-10-25)
 
@@ -341,6 +343,15 @@ fixtures also passed. Evidence is in `/tmp/didcon-claude-startup-workflows.log`.
 tests do not authenticate an account, retrieve credentials, submit a model request, or
 establish that every optional Claude feature is reachable. Existing projects need a
 reviewed policy update and proxy restart as described in the hardening guide.
+
+## Kernel ABI recheck (2026-10-25)
+
+A read-only kernel query in the current workspace returned Landlock ABI 7 on
+`6.18.54.1-microsoft-standard-WSL2` (`x86_64`). The query used
+`landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)`, matching the
+[native probe](../scripts/landlock-abi.rs). The earlier ABI 3 result belongs to the
+2026-10-24 environment. Profiles still request ABI 6. Run `didcon-doctor` in each target
+container to record its kernel ABI and check the active configuration.
 
 ## Remaining work
 
@@ -364,5 +375,6 @@ host quotas and further verification of enforced bounds.
 ## Local recovery logs
 
 The completed integration output was recovered from `/tmp/didcon-mount-validation.log`,
-`/tmp/didcon-volume-validation.log`, and `/tmp/didcon-proxy-validation.log`. These
-logs were temporary evidence. Use the scripts above to reproduce the checks.
+`/tmp/didcon-volume-validation.log`, and `/tmp/didcon-proxy-validation.log`. These logs
+were temporary evidence and may no longer be available. Use the scripts above to repeat
+the checks.

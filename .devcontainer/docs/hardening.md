@@ -7,8 +7,9 @@ and remote Docker daemons have not been validated.
 
 ## Workspace choices
 
-`setup.sh` asks for a language image, a display name, and a workspace mode.
+`setup.sh` asks for a language variant, a container name, and a workspace mode.
 New installations use the TLS-inspecting Smokescreen egress proxy by default.
+Set the workspace mode before running setup to change its default selection.
 
 ```sh
 # Untrusted development: seed a volume from the project's committed HEAD.
@@ -32,8 +33,8 @@ installation, review the layout and run the host preparation command.
 python3 .devcontainer/host/prepare.py --egress proxy .
 ```
 
-This generates a project-local manifest and Compose configuration. Startup runs
-`prepare.py --check`, which validates the frozen layout and generated mounts. It does
+Preparation generates a project-local manifest and Compose configuration. Startup runs
+`prepare.py --check` to validate the reviewed layout and generated mounts. It does
 not accept new submodules automatically. After host review of a topology change, rerun
 preparation explicitly and rebuild. `patch.sh` retains generated `devcontainer.json` and
 reminds you to regenerate it after patching.
@@ -116,7 +117,7 @@ socket. Restart or reconnect the editor as required and run the preflight.
 /opt/scripts/security-preflight.sh
 ```
 
-Repeat the checks after reconnect. The host-integration check attempts actual
+Repeat the checks after reconnect. The host integration check attempts actual
 connections to known paths, including forwarded sockets discovered in `/tmp`. Reachable
 VS Code IPC is reported as exposure, even if it is useful to the IDE. The check does not
 claim that a passing scan discovers every possible IPC path. Probe an additional known
@@ -126,13 +127,15 @@ path with the focused checker. It sends no protocol commands.
 node /opt/scripts/host-integration-check.js --socket /path/to/socket
 ```
 
-Doctor includes failed socket paths directly under Host integrations and mounts and in
-its JSON report. Current reports count each reported finding once. Older versions also
-counted those findings as an overall preflight failure. An additional overall failure
-means the preflight was incomplete or its exit could not be explained by reported
-findings. Run the focused command above without `--socket` for the complete local check,
-or add `--json` for structured output. Credential-helper values and raw child error
-output remain suppressed. An attached IDE can leave `vscode-ipc-*` and
+Doctor lists failed socket paths in the Host integrations and mounts group and in its
+JSON report. Each finding is counted once. An additional overall failure means the
+preflight was incomplete or its exit could not be explained by reported findings. See
+the [diagnostic validation record](hardening-validation.md#rebuild-follow-up-separate-wsl-forwarding-control-2026-10-24)
+for the earlier duplicate-counting behavior.
+
+Run the focused command above without `--socket` for the complete local check, or add
+`--json` for structured output. Credential-helper values and raw child error output
+remain suppressed. An attached IDE can leave `vscode-ipc-*` and
 `vscode-remote-containers-ipc-*` listeners even when workspace protection and egress
 checks pass. A successful connection establishes reachability. Credential retrieval and
 the endpoint’s host capabilities require separate protocol-level verification. The
@@ -225,9 +228,10 @@ output limits and deadlines. Reports include summaries and diagnostic metadata w
 suppressing raw output, environment contents, and credential values. Known failing
 socket paths are included as diagnostic metadata.
 
-A small static helper queries the kernel's actual Landlock ABI using
-[`landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)`](https://docs.kernel.org/userspace-api/landlock.html#landlock-abi-versions). It creates no ruleset and changes no process restrictions. The helper supports Linux
-x86-64 and aarch64. Other architectures return an unsupported result. The doctor
+A small static helper measures the kernel's Landlock ABI with
+[`landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)`](https://docs.kernel.org/userspace-api/landlock.html#landlock-abi-versions).
+It creates no ruleset and changes no process restrictions. The helper supports Linux
+x86-64 and aarch64. Other architectures return an unsupported result. Doctor
 compares the measured ABI with the profiles’ requested ABI 6 features and warns about
 missing support. Those profiles also lack pathname Unix-socket connection restrictions
 on newer kernels. A profile declaration alone does not prove effective isolation.
@@ -236,8 +240,8 @@ Proxy checks verify the reviewed fixed endpoint, trust-store paths, public-only 
 validity and system trust, and known environment/Git TLS-verification bypasses. Live
 requests exercise allowed HTTPS, denied CONNECT, missing or mismatched SNI, and
 mismatched decrypted Host. SNI attacks deliberately ignore client-side certificate
-errors to verify enforcement by the proxy. These use the standard `api.github.com`
-/`github.com` fixtures from the default allowlist. The preflight verifies direct
+errors to verify enforcement by the proxy. These probes use `api.github.com` and
+`github.com` from the default allowlist. The preflight verifies direct
 IPv4/IPv6/metadata and Docker-DNS denial.
 
 Use `--offline` to retain local configuration, sandbox, and mount checks while skipping
@@ -272,10 +276,10 @@ profiles to obtain that information. Verify their enforcement and coverage on
 the host. A writable-layer limit does not automatically cover bind mounts and
 dependency volumes.
 
-These observations cover the inspected locations and writable submounts, not every
-possible writable file or Docker/host storage consumer. They require no large write/fill
-test. Budget tmpfs use against the container’s memory limit. A finite filesystem
-capacity can still exceed the memory available for writes.
+The observations cover inspected locations and their visible writable submounts. Other
+writable files and host or Docker storage consumers need separate review. The checks
+require no large write test. Budget tmpfs use against the container's memory limit.
+A finite filesystem capacity can still exceed the memory available for writes.
 
 ## Disposable credential checks
 
@@ -283,13 +287,13 @@ Default preflight inspects credential-helper configuration without invoking a re
 helper or printing its value. To test credential forwarding, configure an isolated
 disposable helper for `https://didcon-preflight.invalid` containing dummy credentials,
 verify that the check detects exposure, then disable the forwarding and verify denial.
-Use the focused check or either explicit preflight option.
+Choose one of the following commands to enable the fixture check.
 
 ```sh
 node /opt/scripts/host-integration-check.js --credential-fixture
-# Or include the same opt-in check in the full preflight:
+# Include the fixture check in the full preflight.
 DIDCON_PREFLIGHT_CREDENTIAL_FIXTURE=1 /opt/scripts/security-preflight.sh
-# Explicit doctor opt-in; use only the disposable fixture described above:
+# Include the fixture check in doctor.
 didcon-doctor --credential-fixture
 ```
 
@@ -326,7 +330,7 @@ python3 .devcontainer/host/prepare.py --egress proxy \
 
 Repeated `--dependency-path` options replace the configured list. Include every path you
 want to retain. Nested volume paths must not overlap one another or protected control
-paths. Entrypoint initializes only exact volume-root ownership for `dev`. Project files
+paths. The entrypoint sets ownership for `dev` only at each volume root. Project files
 are excluded from recursive ownership changes. Startup retains CHOWN for volume roots
 and SETUID/SETGID for the switch to `dev`.
 
@@ -476,8 +480,11 @@ or IP refresh loop is used there.
 
 ## Storage, temporary files, and Kata
 
-`/tmp` is a nosuid,nodev tmpfs limited to 1 GiB and charged to the container memory
-budget. Adjust the generated policy before preparation for a different limit.
+`/tmp` is a tmpfs with `nosuid` and `nodev`, limited to 1 GiB and charged to the container
+memory budget. To change the proxy-mode limit, edit the development service's `/tmp`
+size in [`host/compose_config.py`](../host/compose_config.py), then regenerate the
+configuration with `prepare.py --egress proxy .` and recreate the container. For legacy
+firewall mode, change the `--tmpfs` entry in `devcontainer.json` and recreate it.
 Doctor can verify this filesystem's byte capacity and reports persistent storage
 limits as unverified until supported quota evidence is available.
 Home, source, caches, logs, dependency volumes, proxy keys, and Docker storage

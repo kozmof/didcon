@@ -1,8 +1,8 @@
-# Island (Landlock LSM) Security Research Report
+# Island (Landlock LSM) security research report
 
-This report records filesystem tests against an already-sandboxed Claude Code child
-process on 2026-04-11. The observed denials apply to those probes and that environment.
-They do not establish complete container or host isolation.
+This report records filesystem probes run inside a sandboxed Claude Code child process
+on 2026-04-11. The observed denials apply to those probes and that environment. Container
+and host isolation need separate verification.
 
 | Item | Recorded scope |
 | --- | --- |
@@ -16,8 +16,8 @@ They do not establish complete container or host isolation.
 
 The June 2026 hardening pinned selected installer inputs and download hashes, made tools
 and policies root-owned, isolated agent state, restricted IP egress to TCP/443, and
-added CPU/memory limits. These changes did not place editor extensions or arbitrary
-dev-user processes inside the tested Landlock domain. Section 8 describes that earlier
+added CPU and memory limits. Editor extensions and arbitrary processes running as `dev`
+remained outside the tested Landlock domain. Section 8 describes that earlier
 security model.
 
 The 2026-08-01 host review found no visible Docker socket or SUID/SGID binaries. Its
@@ -41,9 +41,9 @@ workspace with Git-object exports, an npx shim, and an external TLS-inspecting p
 with a separate network guard. Section 9 records those changes and their validation
 limits.
 
-## 1. Environment Discovery
+## 1. Environment discovery
 
-### Island Environment Variables
+### Island environment variables
 
 The tested profile redirected these environment paths into application-specific
 directories. These values describe the April environment.
@@ -62,7 +62,7 @@ Environment redirection selects application state locations. Filesystem access d
 on the Landlock policy as well. These variables alone do not establish that unrelated
 home or temporary paths are inaccessible.
 
-### Git Wrapper
+### Git wrapper
 
 The tested container supplied a Git wrapper at `/usr/local/bin/git`. It added the
 `git-workspace` domain around Git and its children.
@@ -83,9 +83,9 @@ still received a denial for `/home/dev/.gitconfig`.
 
 ---
 
-## 2. Bypass Attempts
+## 2. Bypass attempts
 
-### 2.1 Direct Access — BLOCKED
+### 2.1 Direct access — blocked
 
 | Method | Result |
 |---|---|
@@ -93,7 +93,7 @@ still received a denial for `/home/dev/.gitconfig`.
 | `ls /var/` | `Permission denied` |
 | `cat /var/log/syslog` | `No such file or directory` (path not resolvable) |
 
-### 2.2 Proc Filesystem Tricks — BLOCKED
+### 2.2 Proc filesystem tricks — blocked
 
 | Method | Result |
 |---|---|
@@ -109,7 +109,9 @@ still received a denial for `/home/dev/.gitconfig`.
 The recorded `/proc/self` probes were denied. This is historical evidence. Current
 profiles explicitly grant selected proc paths.
 
-### 2.3 Symlink Bypass — BLOCKED
+### 2.3 Symlink bypass — blocked
+
+The probe created a symlink in permitted scratch and tried to list its target.
 
 ```bash
 mkdir -p /tmp/test_bypass
@@ -117,9 +119,10 @@ ln -sf /var/log /tmp/test_bypass/log_link
 ls /tmp/test_bypass/log_link   # → Permission denied
 ```
 
-Landlock follows symlinks to their resolved target. Creating a symlink inside `/tmp` (which is allowed) pointing to `/var/log` (which is denied) does not grant access.
+The symlink resolved to the denied `/var/log` target. Creating it in permitted `/tmp`
+did not grant access to that target.
 
-### 2.4 Alternative Interpreters / Runtimes — BLOCKED
+### 2.4 Alternative interpreters / runtimes — blocked
 
 | Method | Result |
 |---|---|
@@ -128,7 +131,7 @@ Landlock follows symlinks to their resolved target. Creating a symlink inside `/
 | `node -e "fs.readdirSync('/var/log')"` | `EACCES: permission denied, scandir '/var/log'` |
 | `awk` subprocess `ls /var/log` | `Permission denied` |
 
-### 2.5 Compiled Native Binary — BLOCKED
+### 2.5 Compiled native binary — blocked
 
 The compiled C probe called `opendir("/var/log")` directly.
 
@@ -140,7 +143,9 @@ gcc -o /tmp/test_bypass_bin /tmp/test_bypass.c
 The native probe received the same denial as the interpreted probes. This is consistent
 with kernel-enforced filesystem restrictions.
 
-### 2.6 Namespace Escape (nsenter) — BLOCKED
+### 2.6 Namespace escape (nsenter) — blocked
+
+The probe tried to enter PID 1's mount namespace and list `/var/log`.
 
 ```bash
 nsenter --mount=/proc/1/ns/mnt ls /var/log
@@ -150,14 +155,16 @@ nsenter --mount=/proc/1/ns/mnt ls /var/log
 The attempt failed while opening `/proc/1/ns/mnt`. It does not establish that every
 namespace or kernel escape route is unavailable.
 
-### 2.7 Chroot — BLOCKED
+### 2.7 Chroot — blocked
+
+The probe tried to change its root directory before listing `/var/log`.
 
 ```bash
 chroot / ls /var/log
 # → chroot: can't change root directory to '/': Operation not permitted
 ```
 
-### 2.8 Archive/Tool-based Reading — BLOCKED
+### 2.8 Archive/tool-based reading — blocked
 
 | Method | Result |
 |---|---|
@@ -165,7 +172,9 @@ chroot / ls /var/log
 | `tar -C / -cvf /dev/null var/log` | `Permission denied` |
 | `wget file:///var/log/` | Failed silently (exit 1) |
 
-### 2.9 SUID Binaries — NONE FOUND
+### 2.9 SUID binaries — none found
+
+The scan checked three executable directories for SUID files.
 
 ```bash
 find /bin /usr/bin /usr/local/bin -perm -4000
@@ -176,7 +185,7 @@ The scan found no SUID binaries in the three searched directories. Inherited Lan
 restrictions persist across credential changes, but this scan does not cover every
 privileged executable or kernel attack surface.
 
-### 2.10 Island Profile Creation — BYPASS INEFFECTIVE
+### 2.10 Island profile creation — bypass ineffective
 
 The test created a new profile within the redirected configuration directory.
 
@@ -197,11 +206,11 @@ retain or reduce its access. See the
 
 ---
 
-## 3. Accessible Attack Surface
+## 3. Accessible attack surface
 
 The April record also identified the following permitted resources.
 
-### Filesystem (Allowed)
+### Filesystem (allowed)
 
 - `/bin`, `/usr/bin`, `/usr/local/bin`, `/usr/lib`, `/lib` (read/execute)
 - `/etc` (read)
@@ -211,10 +220,10 @@ The April record also identified the following permitted resources.
 - `/home/dev/.config/island-config-profiles/claude-code/` for application config.
 - `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/full` (read/write)
 
-### Network (Allowed)
+### Network (allowed)
 
 - TCP connections to localhost and remote hosts are allowed
-- VSCode IPC socket (`/tmp/vscode-ipc-*.sock`) — connectable
+- VS Code IPC socket (`/tmp/vscode-ipc-*.sock`) — connectable
 - Codex IPC socket (`/tmp/codex-ipc/ipc-1000.sock`) — accessible
 
 Permitted TCP and IPC access provided communication paths outside the tested filesystem
@@ -222,9 +231,11 @@ denials. The later network and host-integration controls need their own verifica
 
 ---
 
-## 4. Architecture of the Sandbox
+## 4. Architecture of the sandbox
 
-```
+Commands launched by the sandboxed Claude Code process inherited its restrictions.
+
+```text
 Host OS
 └── island (Landlock ruleset applied)
     └── Claude Code process
@@ -245,7 +256,7 @@ paths.
 
 ---
 
-## 5. Findings Summary
+## 5. Findings summary
 
 | Category | Finding |
 |---|---|
@@ -273,36 +284,24 @@ These recommendations interpret the historical results using the current model.
 
 ---
 
-## 7. Git Sub-Sandbox: Detailed Documentation
+## 7. Git sub-sandbox: detailed documentation
 
-### How It Works
+### How it works
 
-Didcon supplies the wrapper shown in Section 1. It runs the resolved `git` command
-through `island run -p git-workspace`. The current [shim](../scripts/shims/git) also
-fixes the island configuration path.
-
-The historical wrapper was as follows.
-
-```sh
-#!/bin/sh
-# Wrapper that runs git inside the island git-workspace Landlock sandbox.
-# Protects against compromised git hooks reading ~/.ssh keys or credentials.
-# SSH authentication still works via ssh-agent (socket path is in /tmp).
-#
-# To bypass the sandbox, use the full path: /usr/bin/git
-exec island run -p git-workspace -- /usr/bin/git "$@"
-```
+The [historical wrapper](#git-wrapper) runs `/usr/bin/git` through
+`island run -p git-workspace`. The current [shim](../scripts/shims/git) also sets
+`XDG_CONFIG_HOME=/etc` so island can find its profiles.
 
 The Git-specific domain nests inside the already-running agent domain.
 
-```
+```text
 Claude Code sandbox (Landlock)
 └── git wrapper (/usr/local/bin/git)
     └── island run -p git-workspace
         └── /usr/bin/git (deeper Landlock restrictions)
 ```
 
-### Threat Model
+### Threat model
 
 Git hooks execute within the permissions of the Git process. The additional
 `git-workspace` domain can reduce those permissions further. Current policy omits
@@ -315,13 +314,7 @@ config paths can remain exposed. Consult the
 [current Git policy](../island/profiles/git-workspace/landlock/policy.toml) for its
 actual grants.
 
-### Known Bypass: `/usr/bin/git`
-
-The historical wrapper documented its direct invocation path.
-
-```sh
-# To bypass the sandbox, use the full path: /usr/bin/git
-```
+### Known bypass: `/usr/bin/git`
 
 The research recorded this direct Git invocation and its error output.
 
@@ -339,7 +332,7 @@ Use the direct path only for reviewed operations that cannot use the wrapper. It
 documented availability means the shim alone cannot enforce a mandatory Git boundary
 against hostile code.
 
-### Risk Assessment
+### Risk assessment
 
 | Scenario | Risk |
 |---|---|
@@ -349,7 +342,7 @@ against hostile code.
 | Hook tries to read `~/.ssh/id_rsa` | The current Git and agent policies omit that key path. Direct Git does not remove an outer denial. |
 | Hook tries to read `/workspace` files | Allowed in both cases (workspace is a permitted path) |
 
-### Recommendations for the Git Sub-Sandbox
+### Recommendations for the Git sub-sandbox
 
 1. Keep `/usr/local/bin` before `/usr/bin` for normal command resolution. PATH ordering
    is a convenience and can be bypassed with an absolute path.
@@ -362,7 +355,7 @@ against hostile code.
 
 ---
 
-## 8. Security Model Before the October Hardening (2026-06-20)
+## 8. Security model before the October hardening (2026-06-20)
 
 The devcontainer is defense in depth, not a boundary for mutually untrusted code running
 as `dev`.
@@ -377,13 +370,14 @@ as `dev`.
 - The Chainguard free-tier base images still use moving `latest-dev` tags. Production rebuilds should resolve and review immutable digests in CI.
 - Direct paths to underlying tools remain an explicit administrative bypass. Do not use them with untrusted repositories.
 - Availability protection is bounded by PID, memory, and CPU limits, but the writable workspace can still be filled or damaged.
-
 - TCP port filtering requires Landlock ABI 4. On older kernels, firewall rules supply
   that enforcement. Review preflight and startup results after rebuilds.
 
-The intended threat model is accidental or malicious behavior in agent-spawned child processes and package hooks. It does not treat the `dev` account, the Docker daemon, the kernel, approved remote services, or the host-mounted project as untrusted principals.
+This earlier model addressed accidental or malicious behavior in agent-spawned child
+processes and package hooks. It trusted the `dev` account, Docker daemon, kernel, approved
+remote services, and host-mounted project.
 
-## 9. October Hardening Implementation (2026-10-24)
+## 9. October hardening implementation (2026-10-24)
 
 New setup defaults use a generated Compose topology. A separate network-guard container
 owns the development network’s firewall rules. The development container has no

@@ -1,8 +1,8 @@
 # Bumping pinned tool versions
 
-Update image-installed tools by changing their build inputs and rebuilding the
-container. Those agents, package managers, and toolchains are root-owned. The `dev` user
-cannot replace them through self-update commands.
+Update image-installed tools by changing their build settings and rebuilding the
+container. Agents, package managers, and toolchains are owned by root. Their self-update
+commands cannot replace the installations when run as `dev`.
 
 Most tools install during the image build. safe-chain installs separately through
 `postCreateCommand`. Claude Code and Codex default to npm's `latest` tag. Other listed
@@ -10,8 +10,8 @@ tools use version or source pins.
 
 ## Where each version lives
 
-The five Dockerfiles share the core build arguments. Keep shared defaults in sync when
-updating the template. Variant-specific toolchains have their own arguments.
+All five Dockerfiles share the core build arguments. Keep their shared defaults in sync
+when updating the template. Each additional toolchain has its own arguments.
 
 | Tool | Setting | Repository default | Location or constraint |
 | --- | --- | --- | --- |
@@ -30,8 +30,9 @@ updating the template. Variant-specific toolchains have their own arguments.
 | safe-chain | `VERSION`, `SHA256` | `1.5.20` | [`scripts/install-safe-chain.sh`](../scripts/install-safe-chain.sh) |
 
 The source [`devcontainer.json`](../devcontainer.json) also supplies
-`CLAUDE_CODE_VERSION`, `CODEX_VERSION`, `NPM_VERSION`, `PNPM_VERSION`, `ISLAND_REV`, and `INSTALL_HERDR` as build arguments. Change those values there before initial
-preparation to override Dockerfile defaults.
+`CLAUDE_CODE_VERSION`, `CODEX_VERSION`, `NPM_VERSION`, `PNPM_VERSION`, `ISLAND_REV`, and
+`INSTALL_HERDR` as build arguments. Change those values there before initial preparation
+to override Dockerfile defaults.
 
 Proxy preparation moves build settings into the manifest and generated Compose
 configuration. For an existing proxy installation, review the `build` values in
@@ -43,8 +44,9 @@ See [workspace preparation](hardening.md#workspace-choices).
 
 The sidecar has separate pins in [`egress/Dockerfile`](../egress/Dockerfile). Update
 the source commit, archive SHA256, compiler image digest, and runtime image digest as
-needed. Keep the source commit in the image label and the image tag in
-[`host/compose_config.py`](../host/compose_config.py) aligned.
+needed. Update the image label and the tag in
+[`host/compose_config.py`](../host/compose_config.py) to identify the selected source
+commit.
 
 Build with the vendored dependencies from the selected archive. The current compiler
 image uses Go `1.27.3`. Check [Go releases](https://go.dev/dl/) when reviewing compiler
@@ -70,8 +72,8 @@ The development images use `cgr.dev/chainguard/node:latest-dev`. Their island bu
 uses `cgr.dev/chainguard/rust:latest-dev`. Both are moving tags. Source pins and
 download hashes do not make the full development image reproducible.
 
-A stale cached base can be incompatible with packages from the current apk repository. A
-recorded failure built successfully but failed when running `jq`.
+A cached base image can be incompatible with packages from the current apk repository.
+One recorded build succeeded but produced this error when running `jq`.
 
 ```text
 jq: /usr/lib/libm.so.6: version `GLIBC_2.44' not found (required by /usr/lib/libjq.so.1)
@@ -91,8 +93,9 @@ also need separate attention.
 
 ## Bumping an npm tool (Claude Code, Codex, npm)
 
-1. Edit the build argument in the source configuration or the prepared proxy manifest as
-   described above. Prefer an exact version for repeatable builds.
+1. Edit the build argument in the source configuration or the prepared proxy manifest.
+   Follow [the build-setting locations above](#where-each-version-lives). Prefer an exact
+   version for repeatable builds.
 2. Regenerate a prepared configuration after changing its reviewed build inputs.
 3. Select Dev Containers: Rebuild Container in VS Code, or build manually with
    `docker build --pull`.
@@ -171,8 +174,8 @@ root-owned installation as `dev`.
 ## Blender API stubs
 
 The Blender image installs its pinned requirements file at `/etc/uv/blender-stubs.txt`,
-owned by root and read-only. Install the stubs into a project environment with this
-command.
+owned by root and read-only. Create a project environment with the
+[Blender tooling commands](language-variants.md#blender-notes), then install the stubs.
 
 ```sh
 uv pip install --require-hashes -r /etc/uv/blender-stubs.txt
@@ -204,7 +207,7 @@ package-manager checks.
 
 ## Codex
 
-Each Dockerfile seeds the following setting in Codex's configuration homes.
+Each Dockerfile writes the following setting to Codex's configuration directories.
 
 ```toml
 check_for_update_on_startup = false

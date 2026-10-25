@@ -1,9 +1,9 @@
 # didcon hardening task checklist
 
-Use the [security improvement report](harden-1.md) with this checklist. Created on
-2026-10-24.
+Track hardening implementation and verification with this checklist and the
+[security improvement report](harden-1.md). The checklist was created on 2026-10-24.
 
-Track implementation and verification separately for Phases 1–3. Record the versions and
+Record implementation and verification separately for Phases 1–3. Include versions and
 evidence before marking a phase complete. Phase 4 covers additional controls. Its
 filtered DNS tasks apply to legacy firewall mode. Kata evaluation is deferred to a
 suitable Linux/KVM host.
@@ -19,11 +19,11 @@ commands, and results in the
 The attached-IDE checks found reachable X11, Git, and editor sockets. Wayland mount
 removal passed after recreation. Fresh-attachment X11 denial, real host credential
 denial, reconnect behavior, authenticated agents, non-Node workflows, and persistent
-quotas remain open. Socket acknowledgment changes diagnostics while preserving the
-exposure and the open isolation task.
+quotas remain open. Socket approval changes diagnostic severity. The endpoint remains
+exposed, and the isolation task remains open.
 
-Checked tasks below indicate implemented behavior or the stated fixture coverage. They
-do not establish completion of the broader host and workflow checks.
+Each checked task records implementation or the fixture coverage stated in that item.
+Complete the broader host and workflow checks separately before closing a phase.
 
 ## Preparation
 
@@ -90,7 +90,8 @@ Plan: [Phase 2](harden-1.md#phase-2-volume-workspace-and-reviewed-exports).
 - [x] Add explicit trusted bind mode and untrusted volume mode to setup.
 - [x] Clone the development repository into a project-specific container volume in volume mode.
 - [x] Keep host-owned launch configuration outside the container's writable project and keep the host checkout outside its writable mounts.
-- [x] Define a Git-object or patch export mechanism that does not expose the Docker socket, mount the volume read-write on the host, or provide host credentials to the development container.
+- [x] Add Git-object export without exposing the Docker socket, mounting the volume
+      read-write on the host, or providing host credentials to the development container.
 - [x] Receive proposed changes into a separate host-controlled repository with trusted Git configuration and hooks.
 - [x] Document review before checkout or merge, including
       `git diff --text --no-textconv --no-ext-diff <trusted-base> <candidate>`.
@@ -119,8 +120,13 @@ Plan: [Phase 3](harden-1.md#phase-3-egress-proxy-sidecar).
 - [x] Preserve the CA identity during migration and keep private keys read-only in the
       proxy. Publish only its certificate. Test restart, legacy-key migration, invalid
       permissions, and missing-key failure.
-- [x] Cover the Smokescreen wrapper with eight Go security tests, including real local TLS handshakes, upstream certificate rejection, DNS response filtering, and HTTP/1.1 CONNECT compatibility with safe-chain.
-- [x] Validate packaged Node safe-chain, npm/npx/pnpm, nested agent profiles, Git HTTPS, and all 60 production preflight checks through Smokescreen.
+- [x] Cover the Smokescreen wrapper with the eight Go security tests recorded in the
+      [migration checkpoint](.devcontainer/docs/hardening-validation.md#smokescreen-migration-2026-10-24).
+      Include local TLS handshakes, upstream certificate rejection, DNS response
+      filtering, and HTTP/1.1 CONNECT compatibility with safe-chain.
+- [x] Validate packaged Node safe-chain, npm/npx/pnpm, nested agent profiles, Git HTTPS,
+      and all 60 production preflight checks through Smokescreen at the migration
+      checkpoint.
 - [x] Select TLS interception and document certificate trust requirements and any
       retained domain-fronting risk.
 - [x] Add a Compose configuration with a dedicated internal development network and external egress enforcement outside the development container.
@@ -160,8 +166,8 @@ Plan: [Phase 4](harden-1.md#phase-4-filtered-dns-and-narrower-temporary-file-acc
 ### Filtered DNS: implementation
 
 Proxy mode denies client DNS and delegates destination resolution to the sidecar. A
-client dnsmasq/ipset resolver is deferred for legacy firewall mode. Its unchecked tasks
-below remain deferred.
+client dnsmasq/ipset resolver is deferred for legacy firewall mode. The checked DNS
+controls below apply to proxy mode. Unchecked resolver tasks remain deferred.
 
 - [x] Decide whether filtered DNS is needed as an interim control, part of the proxy architecture, or both.
 - [ ] Configure a resolver such as dnsmasq with a dedicated runtime UID and only the privileges it requires.
@@ -199,18 +205,18 @@ below remain deferred.
 
 ### Temporary-file access: verification
 
-- [ ] Test direct tool launches and herdr → agent → tool nesting, including safe-chain
-      and package build hooks. Direct Node workflows and nested agent-profile → npm file
-      passing passed. The herdr multiplexer and remaining language build hooks are
-      pending.
+- [ ] Test direct tool launches and tools nested under herdr and an agent, including
+      safe-chain and package build hooks. Direct Node workflows and temporary-file
+      passing from agent profiles to npm passed. The herdr multiplexer and remaining
+      language build hooks are pending.
 - [ ] Confirm tools using hard-coded `/tmp` paths either work under the chosen policy or have a documented supported alternative.
 - [ ] Confirm the replacement scratch paths have appropriate storage limits and do not expose host-forwarded capabilities.
 - [ ] If adopting ABI 9 socket rules, verify kernel and island support, enforce the required rights, and test actual pathname-socket connection denial before claiming protection.
 
 ## Optional: Kata Containers
 
-Deferred until a suitable Linux/KVM host and Kata runtime are available. No
-untested Kata setup option has been added.
+Evaluation requires a suitable Linux/KVM host and Kata runtime. The setup option remains
+deferred until compatibility checks pass.
 
 Plan: [Kata evaluation](harden-1.md#kata-containers-evaluation).
 

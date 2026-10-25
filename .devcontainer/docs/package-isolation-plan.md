@@ -2,10 +2,11 @@
 
 Status: proposed, not implemented. Recorded on 2026-10-24.
 
-This plan proposes separate execution environments for editors, agents, and project
-packages. It extends the [socket security review](socket-security.md). Current
-protections and [open validation tasks](hardening-validation.md#remaining-work) remain
-as recorded until implementation and boundary tests pass.
+This plan proposes separate containers for editors, agents, and project packages. It
+extends the [socket security review](socket-security.md). The
+[validation record](hardening-validation.md#remaining-work) describes current protections
+and open checks. This proposal adds no protection until implementation and boundary
+tests pass.
 
 ## Objective and limits
 
@@ -13,9 +14,9 @@ Treat project dependencies and project-controlled commands as potentially
 malicious. Restrict the resources they can affect even when scanning fails to
 identify them as malicious.
 
-The proposed boundary must deny package access to editor and host integration sockets,
+The package environment must block access to editor and host integration sockets,
 protected host and agent credentials, launch and control files, and the container
-engine. Test each denied operation from the actual package environment before claiming
+engine. Test each denial from the actual package environment before claiming
 containment.
 
 Socket isolation alone cannot make a malicious dependency harmless. Within its allowed
@@ -23,7 +24,7 @@ environment, a package can still corrupt writable files, change build results, c
 resources up to their limits, and use permitted network access. Permitted destinations
 can accept uploads, so hostname enforcement cannot prevent all data exfiltration.
 
-The baseline assumes the host, container engine, protected launcher, and approved
+The proposal assumes the host, container engine, protected launcher, and approved
 agent/editor binaries are trusted. Kernel/runtime exploits and compromise of
 those trusted components remain outside the initial containment claim. An agent
 can also misuse its own permitted API authority, including through prompt
@@ -55,9 +56,8 @@ context. Both paths must be addressed before claiming containment.
 
 ## Proposed execution boundaries
 
-The initial candidate uses three execution environments, managed by trusted host
-tooling. Start with separate containers. Evaluate another boundary only when it passes
-the same containment and workflow tests.
+Start with three separate containers managed by trusted host tooling. Evaluate another
+boundary only when it passes the same containment and workflow tests.
 
 | Environment | Intended authority | Required separation |
 | --- | --- | --- |
@@ -75,12 +75,11 @@ flowchart LR
     R --> V["Review and explicit promotion"]
 ```
 
-The controller is an enforcement component. Its interface must accept bounded
-job requests, not arbitrary host shell commands, Compose files, mount sources,
-privilege flags, or container-engine API operations from project code.
-Workers must not be able to change their launch policy or create more privileged
-jobs. Host orchestration does not require a Docker socket in the editor, agent,
-or package container.
+The controller enforces the job policy. Its interface must accept only bounded job
+requests. Reject project-supplied host shell commands, Compose files, mount sources,
+privilege flags, and container-engine API operations. Workers must not be able to change
+their launch policy or create jobs with more privileges. Keep host orchestration outside
+the editor, agent, and package containers so none requires a Docker socket.
 
 This architecture remains a proposal until command routing is enforceable.
 Changing PATH, adding shell aliases, clearing environment variables, or asking
@@ -100,7 +99,7 @@ configuration remain untrusted. The editor must not automatically load a linter,
 formatter, plugin, executable cache, or script written by the worker into its
 own privileged context. Read-only mounts alone do not make such execution safe.
 
-Bind reviewed changes to a fixed tree/content identity so a running worker
+Bind reviewed changes to a fixed tree or content identity so a running worker
 cannot alter them between review and promotion. Preserve the existing protected
 Git/control-file rules and reviewed exports. Do not import worker hooks, Git
 configuration, or launch configuration as trusted host state.
@@ -129,8 +128,8 @@ the containment requirements.
   worker routing or explicit disablement for each feature in strict mode.
 - [ ] Specify the controller's authentication, job schema, policy ownership,
   allowed mounts, command handling, time/output limits, and cancellation behavior.
-- [ ] Build a disposable Node prototype that demonstrates separation on the
-  observed ABI 3 host without assuming a kernel upgrade.
+- [ ] Build a disposable Node prototype that demonstrates separation using the selected
+  host's measured ABI without assuming a kernel upgrade.
 
 Integrate strict mode only after tests exclude direct-execution and controller bypasses.
 Revise the architecture and its claims if those tests expose a gap.
@@ -205,9 +204,9 @@ or stopped fixture cannot establish enforced denial.
 - [ ] Integrate the validated topology and protected launcher with preparation,
   setup, patching, and runtime checks. Preserve existing workspace data and mode
   until an explicit migration selects the new arrangement.
-- [ ] Make strict mode refuse unsupported enforcement or launch paths. Document the
-      exposure of compatibility mode separately. Reject unsupported strict-mode paths
-      rather than silently relaxing enforcement.
+- [ ] Make strict mode reject unsupported enforcement or launch paths. Document
+      compatibility-mode exposure separately and require explicit selection before
+      relaxing enforcement.
 - [ ] Record the supported host/kernel/editor and language workflow matrix.
   Retain open items when a platform or variant has not been exercised.
 - [ ] Document credential provisioning, editor limitations, job lifecycle,
@@ -226,8 +225,8 @@ Evaluate the following options after baseline boundary tests pass.
 | Newer Landlock pathname-socket enforcement | Require compatible kernel and userspace support, suitably narrow path rules, and live denial tests. Raising the ABI while broadly granting `/tmp` access is not sufficient. |
 | A credential broker outside package execution | Permit only reviewed operations and destinations. Exclude general secret-return and host-execution methods. Available API authority can still be abused. |
 
-These are candidates, not implemented protections or substitutes for proving
-the complete execution boundary.
+Evaluate each candidate against the complete execution boundary. All remain
+unimplemented.
 
 ## Acceptance criteria
 
