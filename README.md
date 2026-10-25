@@ -307,10 +307,14 @@ didcon-doctor --strict                     # Treat warnings as failures
 Reports distinguish passes, failures, warnings, and skipped checks. Exit status
 is 0 without failures, 1 for failures (also warnings with `--strict`), and 2 for
 invalid arguments. Offline reports explicitly mark live enforcement unverified.
-Kernel/profile limitations and host storage quotas that cannot be verified from
-inside the container remain warnings. Host IDE settings, sidecar privileges,
-actual agent authentication, and the complete workflow matrix need separate
-validation. The doctor does not require access to Docker or the CA private key.
+Kernel/profile limitations remain warnings. Storage checks report verified tmpfs
+byte limits, read-only mounts, and unverified limits per location, including
+separate writable submounts. Persistent filesystem and Docker quotas are not
+queried; free space does not prove a quota. See
+[storage limit coverage](.devcontainer/docs/hardening.md#storage-limits-reported-by-doctor).
+Host IDE settings, sidecar privileges, actual agent authentication, and the
+complete workflow matrix need separate validation. The doctor does not require
+access to Docker or the CA private key.
 
 If **Host integrations and mounts** fails, doctor lists the failing paths. Run
 `node /opt/scripts/host-integration-check.js` for the focused check. Reachable

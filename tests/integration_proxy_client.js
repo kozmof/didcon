@@ -16,16 +16,25 @@ function request(connectHost, sni = connectHost, hostHeader = connectHost, optio
     connect.on('error', reject);
     connect.on('timeout', () => connect.destroy(new Error('CONNECT timeout')));
     connect.on('connect', (response, socket) => {
-      if (response.statusCode !== 200) { console.log(`Fixture CONNECT ${connectHost}: ${response.statusCode} ${response.headers['x-didcon-denial'] || ''}`); socket.destroy(); resolve(response.statusCode); return; }
+      if (response.statusCode !== 200) {
+        socket.destroy();
+        if (options.requireTunnel) reject(new Error(`${connectHost} CONNECT failed (HTTP ${response.statusCode})`));
+        else { console.log(`Fixture CONNECT ${connectHost}: ${response.statusCode} ${response.headers['x-didcon-denial'] || ''}`); resolve(response.statusCode); }
+        return;
+      }
       const encrypted = tls.connect({ socket, servername: sni, rejectUnauthorized: options.verify !== false,
         ca: fs.readFileSync('/etc/didcon/trust/ca.pem') });
       encrypted.setTimeout(10000, () => encrypted.destroy(new Error('TLS request timeout')));
       let body = '';
       encrypted.on('error', reject);
-      encrypted.on('secureConnect', () => encrypted.write(`GET /zen HTTP/1.1\r\nHost: ${hostHeader}\r\nUser-Agent: didcon-hardening-test\r\nConnection: close\r\n\r\n`));
+      encrypted.on('secureConnect', () => encrypted.write(`GET ${options.path || '/zen'} HTTP/1.1\r\nHost: ${hostHeader}\r\nUser-Agent: didcon-hardening-test\r\nConnection: close\r\n\r\n`));
       encrypted.on('data', chunk => {
         body += chunk.toString();
+        if (body.length > 65536) { encrypted.destroy(); reject(new Error('Response headers exceeded limit')); return; }
         if (body.includes('\r\n\r\n')) {
+          if (options.requireTunnel && /\r\nx-didcon-denial:\s*1\r\n/i.test(body)) {
+            encrypted.destroy(); reject(new Error(`${connectHost} HTTPS denied by proxy policy`)); return;
+          }
           const status = Number(body.match(/^HTTP\/1[.]1 (\d+)/)?.[1] || 0);
           encrypted.destroy();
           resolve(status);
@@ -62,6 +71,16 @@ async function dnsDenied() {
 }
 
 async function main() {
+  if (process.argv.includes('--claude-connectivity')) {
+    // Public unauthenticated GETs verify the startup hosts through the real
+    // proxy/CA and agent sandbox; they never log in or submit a model request.
+    for (const host of ['api.anthropic.com', 'platform.claude.com']) {
+      const status = await request(host, host, host, { path: '/', requireTunnel: true });
+      assert.ok(status >= 200 && status < 500 && status !== 407, `${host} HTTPS connectivity failed (HTTP ${status})`);
+      console.log(`PASS: sandboxed Claude startup host ${host} reachable through verified HTTPS (HTTP ${status}; authentication not tested)`);
+    }
+    return;
+  }
   if (process.argv.includes('--proxy-down')) {
     await assert.rejects(request('api.github.com'));
     await directDenied('1.1.1.1', 443);

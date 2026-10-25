@@ -11,6 +11,7 @@ const net = require('node:net');
 const { X509Certificate } = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { probeSocket } = require('./host-integration-check.js');
+const { inspectStorageLimits } = require('./storage-limits.js');
 
 const HELP = `Usage: didcon-doctor [--offline] [--json] [--strict] [--credential-fixture]
 
@@ -378,7 +379,28 @@ class Doctor {
         this.add('Storage', 'storage.write.' + target, 'pass', `Small write probe succeeded and was removed: ${target}`);
       }, 'Check mount permissions, volume ownership, disk capacity, and startup initialization.');
     }
-    this.add('Storage', 'storage.host-quotas', 'warn', 'Home/workspace/dependency quota coverage cannot be proven from inside the container', 'Verify host filesystem or Docker storage quotas; /tmp tmpfs alone does not bound disk use.');
+    this.storageBounds(targets);
+  }
+
+  storageBounds(targets, filesystem = fs) {
+    const limits = inspectStorageLimits(targets, filesystem);
+    this.report.storageLimits = limits;
+    for (const limit of limits) {
+      const target = JSON.stringify(limit.path);
+      if (limit.state === 'bounded') {
+        this.add('Storage', 'storage.limit.' + limit.path, 'pass',
+          `Verified tmpfs byte limit for ${target}: ${limit.limitBytes} bytes (filesystem mounted at ${JSON.stringify(limit.mountPoint)})`);
+      } else if (limit.state === 'read-only') {
+        this.add('Storage', 'storage.limit.' + limit.path, 'pass',
+          `Writes blocked through read-only mount for ${target}: ${JSON.stringify(limit.mountPoint)}`);
+      } else {
+        const reason = limit.reason === 'filesystem-quota-not-queried' ?
+          `${limit.filesystem} filesystem; quota enforcement and hard limits have not been queried${limit.quotaFlags?.length ? ' (quota-related mount flags are present)' : ''}` :
+          limit.reason === 'tmpfs-capacity-unverified' ? 'tmpfs capacity could not be verified' : 'path or mount information unavailable';
+        this.add('Storage', 'storage.limit.' + limit.path, 'warn', `Write limit unverified for ${target}: ${reason}`,
+          'Verify an enforced host/filesystem quota for this storage location. Free space and quota mount flags alone do not prove a hard limit; separate writable mounts need their own coverage.');
+      }
+    }
   }
 
   async integrations() {

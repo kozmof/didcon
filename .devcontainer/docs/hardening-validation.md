@@ -299,6 +299,61 @@ approved, and the attached project was not restarted. Actual display-relay
 prevention and socket behavior after a fresh IDE attachment/reconnect remain
 to be verified. Accepted exposure does not complete the socket-isolation task.
 
+## Storage limit diagnostics (2026-10-25)
+
+The unconditional storage-quota warning was replaced with observations per
+reviewed location and visible writable submount. Doctor recognizes read-only
+mounts and finite tmpfs byte capacity using kernel mount information and
+filesystem statistics. Persistent filesystem and Docker driver quotas are
+explicitly unverified; neither free space nor quota mount flags produce a pass.
+JSON reports include `storageLimits`, with mount/type information, evidence or
+an unverified reason, and byte/inode bounds when available. Host mount sources
+and overlay configuration are excluded.
+
+All 31 Node tests and 27 Python tests pass. The storage regressions cover
+symlinks, escaped paths, writable dependency submounts, hidden mounts after a
+parent overmount, malformed/unavailable evidence, and false positives from
+ordinary filesystem capacity or quota flags. When all inspected locations have
+verified bounds, there is no automatic storage-quota warning.
+
+A disposable network-isolated container verified an actual 8 MiB tmpfs,
+read-only bind, symlink resolution, and a separate writable dependency volume
+that remains unverified beneath the bounded parent. No filesystem was filled.
+The packaged `didcon-hardening-test:storage-limits` workflow also passed the
+complete doctor checks, all 60 production preflight checks, package/tool
+workflows, and socket acknowledgment/revocation fixtures. Its storage assertions
+verified the real `/tmp` byte cap and the workspace's unverified quota status.
+
+Evidence: `/tmp/didcon-storage-limits-build.log` and
+`/tmp/didcon-storage-limits-workflows.log`; reproducible checks are in
+`tests/test_storage_limits.js`, `tests/integration_storage_limits.js`, and the
+packaged workflow harness. The fixture containers and volumes were removed.
+Persistent quota enforcement, host storage consumers, and other writable paths
+outside the inspected locations still require separate verification.
+
+## Claude startup hostname (2026-10-25)
+
+The attached project's Claude launch failed with `ERR_PROXY_TUNNEL` for
+`platform.claude.com`. A public CONNECT probe reproduced HTTP 403 with the
+proxy's policy-denial marker. The hostname was absent from both the repository
+and target allowlists. Anthropic's documented startup/authentication endpoint
+was added as one exact hostname in the source policy; TLS inspection and the
+remaining restrictions were retained.
+
+The new credential-free workflow probe runs under the Claude Island profile.
+It reproduced the live failure with the old policy: `api.anthropic.com` returned
+HTTP 404 over verified HTTPS, then `platform.claude.com` failed at CONNECT with
+HTTP 403. In the disposable topology with the source fix, both verified HTTPS
+requests completed; the platform returned HTTP 200. Proxy denials are explicitly
+distinguished from upstream HTTP responses so a denied tunnel cannot pass.
+
+The packaged workflow, all 60 production preflight checks, and the socket
+acknowledgment fixtures also passed. Evidence is in
+`/tmp/didcon-claude-startup-workflows.log`. These tests do not authenticate an
+account, retrieve credentials, submit a model request, or establish that every
+optional Claude feature is reachable. Existing projects need a reviewed policy
+update and proxy restart as described in the hardening guide.
+
 ## Remaining work
 
 1. Extend the passing Node workflow checks to Go, Rust, Zig, Blender/uv, actual

@@ -16,6 +16,7 @@ malware-list.aikido.dev
 marketplace.visualstudio.com
 npm.flatt.tech
 objects.githubusercontent.com
+platform.claude.com
 pypi.flatt.tech
 raw.githubusercontent.com
 registry.npmjs.org

@@ -7,6 +7,9 @@ for tool in claude codex npm npx pnpm git; do
     "$tool" --version
 done
 
+echo 'TEST: sandboxed Claude startup HTTPS without credentials'
+XDG_CONFIG_HOME=/etc island run -p claude-code -- node - --claude-connectivity < /tests/integration_proxy_client.js
+
 echo 'TEST: pinned safe-chain installation through TLS inspection'
 /bin/sh /opt/scripts/install-safe-chain.sh
 /bin/bash -i -c 'npm safe-chain-verify'

@@ -33,6 +33,9 @@ if (process.getuid() === 0) {
   assert.equal(normal.report.preflight.fail, 0);
   assert.ok(normal.report.preflight.pass >= 60);
   assert.ok(normal.report.system.landlockABI > 0);
+  assert.ok(normal.report.storageLimits.some(limit => limit.path === '/tmp/didcon' && limit.state === 'bounded' && limit.limitBytes === 1024 ** 3));
+  assert.ok(normal.report.checks.some(check => check.id === 'storage.limit./tmp/didcon' && check.status === 'pass'));
+  assert.ok(normal.report.storageLimits.some(limit => limit.path === '/workspace' && limit.state === 'unverified'));
   for (const id of ['proxy.https', 'proxy.connect-denial', 'proxy.mismatched-sni', 'proxy.missing-sni', 'proxy.host-mismatch',
     'proxy.ca', 'proxy.system-trust', 'runtime.capabilities', 'resources.memory', 'resources.cpus', 'resources.pids']) {
     assert.ok(normal.report.checks.some(check => check.id === id && check.status === 'pass'), id);

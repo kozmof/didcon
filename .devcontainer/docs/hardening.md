@@ -249,11 +249,37 @@ skipped; a missing tool required by the selected variant fails. `--strict` makes
 warnings fail as well. Exit codes are 0 without failures, 1 for failures (or
 strict warnings), and 2 for invalid arguments.
 
-Host quota coverage, IDE forwarding settings, sidecar capabilities, live DNS
-rebinding, and real agent authentication cannot be proved by these checks.
-Resource-limit and quota warnings require host review. The doctor never repairs
-configuration, installs packages, or authenticates agents, and needs neither the
-Docker socket nor the proxy CA private key.
+IDE forwarding settings, sidecar capabilities, live DNS rebinding, and real agent
+authentication require separate host/workflow checks. Unverified storage limits
+also require host review. The doctor never repairs configuration, installs
+packages, or authenticates agents, and needs neither the Docker socket nor the
+proxy CA private key.
+
+### Storage limits reported by doctor
+
+Doctor reports write-limit evidence for workspace, home, shared scratch, and
+configured dependency paths. It resolves symlinks and checks visible writable
+submounts separately, so a bounded parent cannot hide an unverified dependency
+or cache mount. JSON reports include these observations in `storageLimits`.
+
+| Result | Evidence | Scope |
+| --- | --- | --- |
+| PASS: verified tmpfs byte limit | Kernel mount information identifies tmpfs and `statfs` reports a finite positive capacity with the matching filesystem type. | The byte capacity of that tmpfs filesystem, shared by its paths and aliases; separate mounts are checked independently. Inode limits are recorded when available. |
+| PASS: read-only mount | The effective visible mount is read-only. | Writes through that mount; another writable alias is a separate storage location. |
+| WARN: write limit unverified | Persistent filesystem/driver quotas have not been queried, or path/mount/capacity information is unavailable. | The named location needs further verification; the warning does not establish that quotas are absent. |
+
+Free space and quota-related mount flags do not establish an enforced hard
+limit. Doctor currently does not query filesystem user/group/project quotas or
+Docker storage-driver limits, and it does not change privileges or security
+profiles to obtain that information. Verify their enforcement and coverage on
+the host. A writable-layer limit does not automatically cover bind mounts and
+dependency volumes.
+
+These observations cover the inspected locations and writable submounts, not
+every possible writable file or Docker/host storage consumer. They require no
+large write/fill test. Tmpfs usage also consumes the container's memory budget;
+a verified filesystem capacity is not a guarantee that all of it can be filled
+without an out-of-memory failure.
 
 ## Disposable credential checks
 
@@ -372,6 +398,28 @@ addresses, metadata addresses, and mismatched identities are denied. Allowlists
 are exact names in `egress/allowed-hosts.txt`; wildcards and CIDRs are rejected.
 The proxy listens on port 443, which existing agent TCP policies already allow.
 
+Claude Code's startup and authentication/token-exchange traffic needs
+`platform.claude.com` as well as the existing `api.anthropic.com`. Both are exact
+entries in the default proxy allowlist. A missing platform entry causes
+`ERR_PROXY_TUNNEL` before authentication. A denied CONNECT is a proxy policy
+failure; it does not call for disabling TLS verification.
+[Claude Code network requirements](https://code.claude.com/docs/en/network-config#network-access-requirements).
+
+For a reviewed hostname-policy change, update the target project's
+`.devcontainer/egress/allowed-hosts.txt` on the host and run, from that project:
+
+```sh
+docker compose -f .devcontainer/compose.generated.json restart proxy
+```
+
+The proxy reads its policy at startup, so editing the file alone does not reload
+it. Restarting the proxy briefly interrupts proxied connections and retains the
+workspace and CA volumes. Optional Claude features and other authentication
+flows may need additional exact hosts; review them individually rather than
+adding a wildcard. The packaged workflow tests public, credential-free HTTPS
+requests to both startup hosts under the Claude Island profile. These checks
+verify transport, not account authentication or model access.
+
 `egress/Dockerfile` pins Smokescreen commit
 `68e7b8218e226bc47d09ce705fdb8fed82145ceb`, the source archive checksum, and the Go
 build and distroless runtime image digests. Its vendored dependencies build without
@@ -435,6 +483,8 @@ or IP refresh loop is used there.
 
 `/tmp` is a nosuid,nodev tmpfs limited to 1 GiB and charged to the container memory
 budget. Adjust the generated policy before preparation for a different limit.
+Doctor can verify this filesystem's byte capacity and reports persistent storage
+limits as unverified until supported quota evidence is available.
 Home, source, caches, logs, dependency volumes, proxy keys, and Docker storage
 still require host/filesystem quotas or bounded dedicated allocations where
 their exhaustion would harm the host. CPU, PID, and memory limits do not impose
