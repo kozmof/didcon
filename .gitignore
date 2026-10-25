@@ -4,3 +4,4 @@ __pycache__/
 .devcontainer/seed.bundle
 .devcontainer/compose.generated.json
 .devcontainer/socket-allowlist.json
+.codex
