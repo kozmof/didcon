@@ -8,19 +8,17 @@ evidence before marking a phase complete. Phase 4 covers additional controls. It
 filtered DNS tasks apply to legacy firewall mode. Kata evaluation is deferred to a
 suitable Linux/KVM host.
 
-## Recovery checkpoint (2026-10-24)
+## Implementation and validation status
 
-Phases 1–3 are substantially implemented. The Node image, mount protection, volume
-seeding and export, TLS proxy, shared scratch, doctor, and exact socket approval
-fixtures have recorded passing checks. Keep the dated counts, image identities,
-commands, and results in the
-[validation record](.devcontainer/docs/hardening-validation.md).
+Phases 1–3 are substantially implemented. Fixtures cover mount protection, volume
+seeding and export, TLS proxy enforcement, shared scratch, doctor, and exact socket
+approvals. Use the [validation guide](.devcontainer/docs/hardening-validation.md) for
+commands and coverage limits. Keep detailed environment-specific evidence with local
+test results.
 
-The attached-IDE checks found reachable X11, Git, and editor sockets. Wayland mount
-removal passed after recreation. Fresh-attachment X11 denial, real host credential
-denial, reconnect behavior, authenticated agents, non-Node workflows, and persistent
-quotas remain open. Socket approval changes diagnostic severity. The endpoint remains
-exposed, and the isolation task remains open.
+IDE attachment and reconnect checks, display and host credential denial, authenticated
+agents, non-Node workflows, and persistent quotas remain open. Socket approval changes
+diagnostic severity. The endpoint remains exposed, and the isolation task remains open.
 
 Each checked task records implementation or the fixture coverage stated in that item.
 Complete the broader host and workflow checks separately before closing a phase.
@@ -120,13 +118,12 @@ Plan: [Phase 3](harden-1.md#phase-3-egress-proxy-sidecar).
 - [x] Preserve the CA identity during migration and keep private keys read-only in the
       proxy. Publish only its certificate. Test restart, legacy-key migration, invalid
       permissions, and missing-key failure.
-- [x] Cover the Smokescreen wrapper with the eight Go security tests recorded in the
-      [migration checkpoint](.devcontainer/docs/hardening-validation.md#smokescreen-migration-2026-10-24).
+- [x] Cover the Smokescreen wrapper with
+      [Go security tests](.devcontainer/egress/smokescreen/proxy_test.go).
       Include local TLS handshakes, upstream certificate rejection, DNS response
       filtering, and HTTP/1.1 CONNECT compatibility with safe-chain.
 - [x] Validate packaged Node safe-chain, npm/npx/pnpm, nested agent profiles, Git HTTPS,
-      and all 60 production preflight checks through Smokescreen at the migration
-      checkpoint.
+      and the full production preflight through Smokescreen.
 - [x] Select TLS interception and document certificate trust requirements and any
       retained domain-fronting risk.
 - [x] Add a Compose configuration with a dedicated internal development network and external egress enforcement outside the development container.
@@ -154,7 +151,7 @@ Plan: [Phase 3](harden-1.md#phase-3-egress-proxy-sidecar).
 - [x] Confirm stopping the proxy denies external access instead of enabling a fallback route.
 - [x] Confirm root inside the development container cannot rewrite the external policy or enable direct egress in a disposable integration environment.
 - [ ] Run the supported agent/tool/extension workflows and confirm the removed
-      capabilities are unnecessary. Packaged Node smoke tests and all 60 production
+      capabilities are unnecessary. Packaged Node smoke tests and the production
       preflight checks passed without NET_ADMIN/NET_RAW in the development container.
       The full runtime matrix remains open.
 - [x] Document that approved remote services remain possible exfiltration destinations.

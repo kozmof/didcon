@@ -130,8 +130,8 @@ node /opt/scripts/host-integration-check.js --socket /path/to/socket
 Doctor lists failed socket paths in the Host integrations and mounts group and in its
 JSON report. Each finding is counted once. An additional overall failure means the
 preflight was incomplete or its exit could not be explained by reported findings. See
-the [diagnostic validation record](hardening-validation.md#rebuild-follow-up-separate-wsl-forwarding-control-2026-10-24)
-for the earlier duplicate-counting behavior.
+the [host integration checks](hardening-validation.md#host-integration-checks) for the
+verification procedure and its limits.
 
 Run the focused command above without `--socket` for the complete local check, or add
 `--json` for structured output. Credential-helper values and raw child error output

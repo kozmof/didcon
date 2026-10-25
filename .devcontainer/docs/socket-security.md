@@ -1,8 +1,8 @@
 # VS Code and host socket security
 
-Review reachable editor and host integration sockets with this guide. Its recorded
-checks used VS Code 1.142.0 and Dev Containers 0.469.0 on Windows/WSL2 with Docker Desktop
-on 2026-10-24. Recheck forwarding after version or settings changes.
+Use this guide to review reachable editor and host integration sockets. Forwarding
+behavior depends on the host, editor, and extension version. Recheck forwarding after
+version or settings changes.
 
 Reachable integration sockets let container processes contact editor,
 credential, display, or other services. Some are expected during normal VS Code
@@ -12,8 +12,8 @@ including authentication and permission checks.
 A socket FAIL means the checker reached an endpoint or could not verify isolation.
 Credential theft, desktop access, and host command execution require separate evidence.
 Approving a path accepts the reported exposure and leaves endpoint access unchanged.
-The risk scenarios below are inferred from service capabilities. They have not been
-confirmed as exploits against the attached container.
+The risk scenarios below are inferred from service capabilities. Connection probes
+alone do not confirm those exploits.
 
 - [Scope and threat model](#scope-and-threat-model)
 - [Interaction with didcon protections](#interaction-with-didcon-protections)
@@ -64,7 +64,7 @@ actions depend on the listening service.
 | Smokescreen hostname and TLS enforcement | Governs traffic through the HTTP/HTTPS proxy. It does not filter Unix-socket messages. A host-side helper or browser may make its own network requests under a different policy. |
 | Network guard and dropped network capabilities | Restrict container IP networking and network changes. They do not provide a protocol policy for reachable pathname Unix sockets. |
 | Protected Git/editor control mounts | Prevent changes through reviewed filesystem paths. They do not constrain every operation exposed by an already running service. |
-| Read-only bind mounts | Protect filesystem writes through that mount. The recorded [Wayland probe](hardening-validation.md#first-attached-ide-checks-2026-10-24) still connected through a read-only socket mount. Protocol operations require separate restrictions. |
+| Read-only bind mounts | Protect filesystem writes through that mount. Socket connections and protocol operations require separate checks and restrictions. See [host integration validation](hardening-validation.md#host-integration-checks). |
 | Current Island/Landlock profiles | Request ABI 6 and do not establish pathname Unix-socket connection isolation. A filesystem read denial is not proof of socket connection denial. |
 | Volume workspace mode | Separates workspace writes from the host checkout. Forwarded editor, agent, and display services still require separate review. |
 | Socket approval file | Changes the diagnostic treatment of exact paths. It does not change socket permissions, service methods, authentication, or network rules. |
@@ -74,7 +74,7 @@ sandbox. Run `didcon-doctor` in the target container to measure its kernel's ABI
 profiles request ABI 6. Verify the enforced rights and test actual connection denial
 before claiming socket isolation.
 [Landlock documentation](https://docs.kernel.org/userspace-api/landlock.html),
-[kernel ABI recheck](hardening-validation.md#kernel-abi-recheck-2026-10-25).
+[kernel ABI checks](hardening-validation.md#kernel-abi).
 
 ## Socket inventory and risks
 
@@ -111,11 +111,11 @@ The inspected Dev Containers extension creates a container helper endpoint and s
 consequences depend on the helper methods, forwarding settings, and host components
 participating in the bridge.
 
-The attached-container checks established reachability. The full set of callable host
-operations, host command execution, and credential retrieval through the bridge remain
-unverified. Review the installed version's handlers before attributing those
-capabilities to a listener.
-[Local inspection and validation](hardening-validation.md#rebuild-follow-up-separate-wsl-forwarding-control-2026-10-24).
+Connection probes establish reachability. The full set of callable host operations,
+host command execution, and credential retrieval through the bridge require separate
+verification. Review the installed version's handlers before attributing those
+capabilities to a listener. Follow the
+[host integration checks](hardening-validation.md#host-integration-checks).
 
 ### Git integration sockets
 
@@ -320,23 +320,17 @@ the policy through the intended read-only control mount. See the
 
 ## Evidence and remaining uncertainty
 
-The attached bind-mode container passed workspace/mount and proxy checks while reporting
-X11, Git IPC, and four editor/control IPC paths as reachable or unverified. Those
-findings did not identify every listener as necessary for attachment. A missed Wayland
-bind mount was subsequently detected after fixing discovery. A host-setting change
-followed by recreation removed that mount.
+The [validation guide](hardening-validation.md#host-integration-checks) describes
+automated fixture coverage and the checks needed after IDE attachment and reconnect.
+Workspace and proxy checks can pass while integration sockets remain reachable.
+Verify display and credential forwarding denial in each target environment. Review the
+actual operations exposed through each editor bridge separately.
 
-The X11 startup guard was verified against the installed extension's decision to create
-a relay. Actual connection denial after a fresh attachment or reconnect remains
-unverified. Real credential unavailability and the complete set of host operations
-exposed through editor bridges also remain unverified.
-
-Disposable container tests verified selective approval, continued failure for unlisted
-display paths, explicit display approval, probes outside normal discovery, strict
-warning handling, policy write denial, invalid-policy rejection, and restored failures
-after revocation. They used harmless listeners and dummy credentials. They are not
-protocol-level exploit tests against real host services.
-[Validation evidence](hardening-validation.md#exact-socket-approval-workflow-2026-10-24).
+Disposable socket fixtures exercise selective approval, continued failure for unlisted
+paths, probes outside normal discovery, strict warning handling, policy write denial,
+invalid-policy rejection, and restored failures after revocation. They use harmless
+listeners and dummy credentials. They do not test protocol-level exploits against real
+host services. See the [approval checks](hardening-validation.md#socket-approvals).
 
 The linked VS Code sources describe upstream `main` service capabilities. The installed
 endpoints require a separate review of their exact versions and handlers. Repeat review

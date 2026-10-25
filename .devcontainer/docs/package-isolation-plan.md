@@ -4,7 +4,7 @@ Status: proposed, not implemented. Recorded on 2026-10-24.
 
 This plan proposes separate containers for editors, agents, and project packages. It
 extends the [socket security review](socket-security.md). The
-[validation record](hardening-validation.md#remaining-work) describes current protections
+[validation guide](hardening-validation.md#remaining-work) describes current protections
 and open checks. This proposal adds no protection until implementation and boundary
 tests pass.
 
@@ -211,8 +211,8 @@ or stopped fixture cannot establish enforced denial.
   Retain open items when a platform or variant has not been exercised.
 - [ ] Document credential provisioning, editor limitations, job lifecycle,
   review/export, migration, rollback, and recovery using tested procedures.
-- [ ] Publish results and residual risks in the validation record. Claim only
-  the protections demonstrated in the selected mode and execution contexts.
+- [ ] Document reproducible checks and residual risks in the validation guide. Claim
+  only the protections demonstrated in the selected mode and execution contexts.
 
 ## Optional additional controls
 

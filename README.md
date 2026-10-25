@@ -207,7 +207,7 @@ attachment and reconnect.
 | [Socket security](.devcontainer/docs/socket-security.md) | Review socket exposure and the effect of approving a path. |
 | [Language variants](.devcontainer/docs/language-variants.md) | Configure toolchains, caches, and Blender workflows. |
 | [Version updates](.devcontainer/docs/version-bumps.md) | Update tool versions, source pins, and download hashes. |
-| [Validation record](.devcontainer/docs/hardening-validation.md) | Look up dated test results and unresolved checks. |
+| [Validation guide](.devcontainer/docs/hardening-validation.md) | Run hardening checks and understand their coverage and limits. |
 | [Security improvement report](harden-1.md) and [task checklist](harden-1-checklist.md) | Review the hardening roadmap and its implementation status. |
 | [Island research report](.devcontainer/docs/island-security-research-report.md) | Read the historical filesystem probes and their limits. |
 | [Package isolation plan](.devcontainer/docs/package-isolation-plan.md) | Review the proposed separation of editor, agent, and package execution. Implementation is pending. |

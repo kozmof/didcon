@@ -1,380 +1,213 @@
-# Hardening validation record
+# Hardening validation guide
 
-This record documents hardening checks from 2026-10-24 and later follow-ups. Each
-checkpoint records its own test counts, image identities, versions, and results. Use the
-linked scripts to repeat a check against another revision. Keep the planning files until
-the remaining acceptance checks are complete.
+Use this guide to verify didcon on your host and understand what the tests cover.
+Automated fixtures check selected boundaries. IDE forwarding, authenticated workflows,
+and host storage quotas require checks in the environment where you use the container.
+Follow the [hardening guide](hardening.md) for setup and configuration.
 
-## Environment
+## Check a running container
 
-| Item | Observed value |
+Run doctor as `dev` in an ordinary container terminal after post-create installation.
+Repeat after IDE attachment, reconnect, and changes to forwarding or extensions.
+
+```sh
+didcon-doctor
+didcon-doctor --json > doctor-report.json
+```
+
+Use `--offline` when external requests are unavailable. It keeps local checks and marks
+live network enforcement unverified. Use `--strict` to fail on warnings as well as
+failures. Running doctor as root or inside an agent sandbox does not validate the
+intended execution context. See the [doctor reference](hardening.md#container-doctor)
+for report fields and exit codes.
+
+## Automated test coverage
+
+The repository includes the following checks. Their scope describes what the fixtures
+exercise. A passing run applies to the tested revision, image, and host configuration.
+
+| Area | Fixtures | Coverage |
+| --- | --- | --- |
+| Host preparation and distribution | [Python tests](../../tests/test_prepare.py), [distribution tests](../../tests/test_distribution.py) | Protected-path inventory, unsupported Git layouts, submodules, generated configuration, setup, and patching. |
+| Bind workspace | [Mount integration](../../tests/integration_mounts.py) | Write, removal, and rename denial for protected paths and ancestor mounts. Ordinary Git commits, dependency separation, npx inheritance, and dummy credential checks. |
+| Volume workspace | [Volume integration](../../tests/integration_volumes.py) | Seeding from committed HEAD without host-local Git config, object-only export without checkout, and unchanged host files. |
+| TLS proxy | [Go security tests](../egress/smokescreen/proxy_test.go), [proxy integration](../../tests/integration_proxy.py) | TLS identity checks, upstream verification, DNS-answer filtering, network bypass attempts, CA handling, and denial when the proxy stops or its policy is invalid. |
+| Node workflows | [Workflow harness](../../tests/integration_workflows.sh) | Agent CLI versions, safe-chain installation, npm/npx/pnpm, nested scratch files, public Git HTTPS, and production preflight. |
+| Diagnostics | [Doctor tests](../../tests/test_doctor.js), [packaged integration](../../tests/integration_doctor.js) | Report structure, execution context, TLS checks, credential redaction, offline mode, and strict mode. |
+| Socket approvals | [Host tests](../../tests/test_socket_approvals.py), [runtime fixtures](../../tests/integration_socket_approvals.js) | Exact-path approval, continued probing, warnings, revocation, policy protection, and unchanged failure handling for other checks. |
+| Storage limits | [Storage tests](../../tests/test_storage_limits.js), [mount fixture](../../tests/integration_storage_limits.js) | Finite tmpfs capacity, read-only mounts, symlink resolution, writable submounts, and unverified persistent quotas. |
+
+## Run the repository checks
+
+Run commands from the repository root. Host checks require Python 3.9+, Node, Bash,
+and Git. Container integration checks also require Docker Engine and Docker Compose v2.
+Builds and proxy workflows require network access.
+
+Run the Python and JavaScript tests on the host.
+
+```sh
+python3 -m unittest discover -s tests -q
+node --test tests/test_*.js
+```
+
+Build a Node development image from the same source revision as the tests. The tag below
+is an example for local validation.
+
+```sh
+docker build --pull -t didcon-validation:node -f .devcontainer/Dockerfile .devcontainer
+```
+
+Run the disposable workspace and proxy fixtures against that image.
+
+```sh
+python3 tests/integration_mounts.py --image didcon-validation:node
+python3 tests/integration_volumes.py --image didcon-validation:node
+python3 tests/integration_proxy.py --image didcon-validation:node
+python3 tests/integration_proxy.py --image didcon-validation:node --packaged
+python3 tests/integration_proxy.py --image didcon-validation:node --packaged --workflows
+```
+
+The proxy harness builds the sidecar and creates disposable Compose services, networks,
+and volumes. Its cleanup removes that fixture state. Default runs overlay current
+scripts and profiles. `--packaged` uses the scripts, profiles, and shims installed in
+the image. `--workflows` runs Node package and agent-profile smoke checks, doctor, and
+socket approval fixtures instead of the network attack fixtures. Run both modes.
+
+Build other images with the matching
+[variant configuration](language-variants.md#build-configuration). The Node workflow
+harness does not establish that Go, Rust, Zig, Blender, or uv workflows work.
+
+## TLS proxy checks
+
+The Go tests run during the [sidecar build](../egress/Dockerfile). Local TLS fixtures
+exercise mandatory inspection, exact CONNECT destinations, matching SNI and HTTP
+authority, missing SNI, upstream certificate rejection, and pinned upstream addresses.
+They also cover the HTTP/1.1 CONNECT response required by safe-chain.
+
+DNS fixtures reject private, reserved, and IPv6 answers, including mixed public/private
+responses. These fixtures do not establish live DNS rebinding resistance in every
+deployment.
+
+CA fixtures cover reuse of an existing identity, legacy-key migration, repeated
+initialization, and rejection of invalid, missing, symlinked, or insecurely permissioned
+keys. Verify that only the public certificate reaches the development container. Follow
+the [proxy upgrade procedure](hardening.md#tls-inspecting-egress) when changing an
+existing installation.
+
+The Docker integration checks attempt direct IPv4, IPv6, metadata, and Docker DNS
+access. They test root attempts to change the external guard and continued denial when
+the proxy stops or its policy becomes invalid. SNI attack fixtures deliberately ignore
+client-side certificate errors to test proxy enforcement. Normal upstream verification
+remains enabled.
+
+The workflow harness makes credential-free HTTPS requests to `api.anthropic.com` and
+`platform.claude.com` under the Claude profile. It distinguishes a denied CONNECT from an
+upstream HTTP response. This tests transport only. Account authentication, token
+exchange, model requests, and optional agent features require separate validation.
+
+## Host integration checks
+
+Apply the [host forwarding settings](hardening.md#host-integrations) before creating or
+attaching the container. Wayland mounting, additional WSL forwarding, and X11 relay
+creation have separate controls. Recreate the container when required and test actual
+connections after attachment and reconnect.
+
+Inspect the local findings and probe any additional known socket path.
+
+```sh
+node /opt/scripts/host-integration-check.js --json
+node /opt/scripts/host-integration-check.js --socket /path/to/known/socket
+```
+
+The probe connects and closes without sending editor, display, or agent protocol
+requests. A reachable socket establishes a communication path. It does not establish
+authentication, credential retrieval, or host command execution. A read-only socket
+mount still requires a connection check. Discovery uses `stat` for matching mounted
+objects because directory entries can describe a regular-file placeholder beneath a
+socket mount.
+
+Doctor reports each structured finding once. An additional overall preflight failure
+indicates an incomplete run or an exit status unexplained by the reported findings.
+Credential values and raw helper output are suppressed.
+
+Credential-fill checks require explicit opt-in. Configure a disposable helper with
+dummy values before using `--credential-fixture`. A `.invalid` hostname alone cannot
+prevent an arbitrary helper from returning real credentials. Follow the
+[disposable credential procedure](hardening.md#disposable-credential-checks). Local
+dummy-helper tests do not establish denial of host-forwarded credentials after IDE
+attachment.
+
+### Socket approvals
+
+Follow the [host approval procedure](hardening.md#approving-individual-socket-exposures)
+to retain a reviewed exposure. Approval changes diagnostic severity while leaving
+socket access unchanged.
+
+| Fixture condition | Expected diagnostic behavior |
 | --- | --- |
-| Host | WSL2 / Docker Desktop, kernel `6.6.87.2-microsoft-standard-WSL2` |
-| Docker client/server | `29.0.1` / `29.0.1` |
-| Docker Compose | `2.40.3-desktop.1` |
-| Host Python / Node | `3.12.3` / `v24.11.1` |
-| Built Node test image | `didcon-hardening-test:node` |
-| Recovery Node image ID | `sha256:8d140e5fe350094a1401103ad59b8ccc39b9c44d8655760c7eb776a2c864b2a4` |
-| Proxy | Smokescreen commit `68e7b8218e226bc47d09ce705fdb8fed82145ceb`, source SHA256 and image digests pinned in `egress/Dockerfile` |
-| Proxy compiler/runtime | Go `1.27.3` / distroless static, UID `1000:1000` |
-| IDE / Dev Containers extension versions | Unrecorded at recovery. See the later attached-IDE checkpoint. |
+| Exposed path without approval | Failure. |
+| Exposed path with exact approval | Warning, with connection probes still attempted. |
+| Approved path outside normal discovery | Explicit connection probe. |
+| Warning under `--strict` | Failing exit status. |
+| Invalid or writable-mounted policy | Validation failure. |
+| Revoked approval for an exposed path | Failure returns without restarting the listener. |
+| Credential-helper or container-engine failure | Failure remains regardless of socket approval. |
 
-The recovery inspection found no running `didcon-*` test containers. Tests used
-temporary projects and named volumes and removed their own Compose services, networks,
-and volumes. The crash cause has not been established.
+These fixtures use harmless listeners and dummy credentials. They do not test exploits
+against real host services or establish socket isolation. See the
+[socket security guide](socket-security.md) for service-specific risks and limits.
 
-## Passed checks
+## Storage limits
 
-- Node Dockerfile built successfully from the repository source.
-- `python3 -m unittest discover -s tests -q`: 19 tests passed after migration. Eight Go
-  tests replaced the four Python proxy tests.
-- `node --test tests/test_host_integration.js`: passed again after recovery.
-- `python3 tests/integration_mounts.py --image didcon-hardening-test:node`: passed.
-  Protected files, directories, and ancestor anchors resisted writes, removal, and
-  renaming. Root/submodule commits and npx inheritance passed. The fixture verified
-  tmpfs bounds, dependency write separation, and socket detection. A disposable Git
-  helper fixture also detected available dummy credentials and verified denial after
-  helper removal. Preflight output omitted their values.
-- `python3 tests/integration_volumes.py --image didcon-hardening-test:node`: passed.
-  Volume seeding omits host-local Git configuration, export transfers Git objects
-  without checkout, and the host tree/control files remain unchanged.
-- `python3 tests/integration_proxy.py --image didcon-hardening-test:node`: passed.
-  Allowed HTTPS completed. Identity mismatches, direct IPv4/IPv6, metadata, and Docker
-  DNS access were denied. Development root could not rewrite guard rules. Only the
-  public CA reached the development container. Stopped-proxy and invalid-policy fixtures
-  retained egress denial. Production mount/socket and egress checks passed without an
-  attached IDE.
+Doctor inspects workspace, home, scratch, dependency paths, and visible writable
+submounts. It recognizes read-only mounts and finite tmpfs capacity from kernel mount
+information and filesystem statistics. Persistent filesystem and Docker driver quotas
+remain unverified by doctor.
 
-Host tests at this checkpoint also covered preparation and upgrades, submodule layout
-changes, unsupported Git layouts, mount aliases, symlink/hardlink rejection, preserved
-workspace volume names across egress migration, and private DNS answer rejection.
-Private-address DNS rejection has unit-fixture coverage. Live DNS rebinding remains
-outside the integration coverage.
+The storage mount fixture checks an 8 MiB tmpfs, a read-only mount, symlink resolution,
+and an unverified writable volume beneath a bounded parent. The packaged workflow
+checks the real `/tmp` limit and the workspace's unverified quota status. These checks
+do not fill a filesystem.
 
-## Recovery follow-up: credential and Node workflow checks
+Free space and quota-related mount flags do not prove an enforced hard limit. Verify
+host quotas for persistent storage, including allocations outside the inspected paths.
+Budget tmpfs use against container memory. See the
+[storage reference](hardening.md#storage-limits-reported-by-doctor) for evidence and
+coverage limits.
 
-The opt-in credential-fill probe passed exposed/denied dummy-helper fixtures in
-Docker, with no dummy credential values emitted in preflight output.
+## Kernel ABI
 
-The first Node workflow run reproduced an `EACCES` when npm nested under an agent
-inherited a temporary directory in the agent's home. Startup now creates a shared
-`/tmp/didcon` hierarchy owned by `dev` with mode 0700. Tools and herdr use its root.
-Claude and Codex use subdirectories. Existing `/tmp` grants remain while the rest of the
-tool matrix is validated.
+Run `didcon-doctor` in each target container to measure the kernel's Landlock ABI.
+The [native probe](../scripts/landlock-abi.rs) queries
+`landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` without changing
+process restrictions. A result from another host or an earlier kernel does not describe
+the current environment.
 
-After rebuilding, the packaged workflow passed using only image-installed scripts,
-profiles, and shims.
-
-```sh
-python3 tests/integration_proxy.py --image didcon-hardening-test:node --packaged --workflows
-```
-
-The run recorded the following versions and results.
-
-- CLI versions: Claude Code `2.1.302`, Codex `0.163.0`, npm/npx `11.17.0`, pnpm
-  `10.17.1`, and Git `2.55.0`. Agent authentication/API requests were not tested.
-- Pinned safe-chain `1.5.20` installer download, checksum validation, installation,
-  and npm hook verification through the TLS proxy.
-- Interactive safe-chain npm and pnpm installation of `is-number@7.0.0`, installed
-  package use, sandboxed npm run, and offline npx child execution.
-- Nested Claude/Codex/herdr profile execution of npm, including reading a temporary file
-  passed by the parent and creating/removing child scratch files. The optional herdr
-  multiplexer binary/panes were not installed or exercised.
-- Public Git HTTPS transport through the proxy.
-- Production preflight: 60 passed, 0 failed, 0 warnings.
-
-The protected mount, tmpfs, npx, socket, and credential regression suite also
-passed again after the scratch changes. All 25 island TOML files parsed, shell/JS
-syntax checks passed, and the Python suite had 23 passing tests at that checkpoint.
-
-## Smokescreen migration (2026-10-24)
-
-At this checkpoint, the default sidecar switched to a small didcon wrapper around pinned
-Smokescreen. The build verifies the source archive SHA256 and compiles upstream vendored
-dependencies without network access. It runs eight Go security tests and produces a
-static binary in a shell-free distroless runtime. The running proxy has read-only access
-to the CA key volume. Existing combined `mitmproxy-ca.pem` keys are validated and reused.
-Development containers receive only the certificate. Unit fixtures verify migration
-preserves the key and certificate, restart is idempotent, and invalid, over-permissive,
-symlinked, or missing keys cannot silently trigger CA replacement.
-
-The TLS tests use local servers and exercise real CONNECT and TLS parsing. They verify
-mandatory inspection, exact hostnames, ports, matching CONNECT/SNI/Host, missing SNI,
-mismatched allowlisted Host names, absolute-URL mismatches, client-selected upstream
-proxy rejection, pinned dial addresses, wrong upstream certificate hostnames, and
-untrusted upstream certificates. DNS fixtures reject private/reserved/IPv6 answers and
-mixed public/private responses. Live DNS rebinding and actual forwarded IDE integrations
-remain outside this coverage.
-
-safe-chain rejected the vendored goproxy’s HTTP/1.0 MITM CONNECT response in the package
-workflow. The build now emits HTTP/1.1 for that response, with a Go TLS regression
-check. Request URLs, headers, and bodies are not logged by the proxy.
-
-The migration checkpoint passed these packaged-image checks against Smokescreen.
-
-```sh
-python3 -m unittest discover -s tests -q
-node --test tests/test_host_integration.js
-python3 tests/integration_proxy.py --image didcon-hardening-test:node --packaged
-python3 tests/integration_proxy.py --image didcon-hardening-test:node --packaged --workflows
-```
-
-The Node application image was unchanged from the image recorded above. Workflows again
-passed safe-chain installation, npm/npx/pnpm, nested agent-profile scratch, and Git HTTPS.
-The production preflight recorded 60 passed, 0 failed, 0 warnings. Disposable Docker checks
-run as both dev and root and retain direct IPv4/IPv6, metadata, Docker DNS, private-CA
-isolation, malformed-policy, and stopped-proxy denials. The SNI attack deliberately
-disables client-side certificate verification so it proves enforcement by the proxy.
-Production upstream verification remains enabled. Both suites clean up their own
-containers and volumes.
-
-Logs: `/tmp/didcon-smokescreen-integration.log` and
-`/tmp/didcon-smokescreen-workflows.log`. Build the sidecar with
-`docker build .devcontainer/egress` to reproduce its Go tests.
-
-## Container doctor (2026-10-24)
-
-At this checkpoint, every Dockerfile variant included `didcon-doctor`, shared JavaScript
-diagnostics, and a static Landlock ABI probe. The Node image was built and tested as
-`didcon-hardening-test:doctor`, image ID
-`sha256:dafb3160211ea39e2c205781f774de4977116d38398bc463a2e5624d28be5347` on linux/amd64
-with Node `26.9.0`. This image is distinct from the recovery Node image. Non-Node image
-builds remain unverified.
-
-This checkpoint passed the following commands.
-
-```sh
-node --test tests/test_doctor.js tests/test_host_integration.js
-python3 -m unittest discover -s tests -q
-docker build --pull -t didcon-hardening-test:doctor -f .devcontainer/Dockerfile .devcontainer
-python3 tests/integration_proxy.py --image didcon-hardening-test:doctor --packaged --workflows
-```
-
-The 12 Node tests (eight doctor, four mount checks) and 19 Python tests passed. The
-packaged workflow runs the doctor as dev after safe-chain installation and validates its
-JSON report, tools, resource limits, public certificate trust, and live CONNECT/SNI/Host
-enforcement. Its embedded production preflight reports 60 passed, 0 failed, 0 warnings.
-Doctor reports have no failures but retain warnings for documented kernel/profile,
-quota, and test-resource limitations.
-
-At the 2026-10-24 checkpoint, the native probe measured Landlock ABI 3 on the recorded
-`6.6.87.2-microsoft-standard-WSL2` kernel. Doctor reported warnings for missing ABI 6
-features and the profiles’ pathname Unix-socket limitation. Offline mode marks live
-coverage incomplete. Strict mode rejects warnings. Insecure TLS environment overrides
-and URL-specific Git TLS settings produce failures. Root execution returns a failing,
-incomplete JSON report rather than checking the wrong security context.
-
-A disposable Git helper proves default doctor runs do not invoke it, even when the
-preflight credential-fixture environment flag is inherited. Explicit
-`--credential-fixture` invokes the dummy helper and detects exposure, while keeping
-dummy username/password values out of the JSON output. The test helper is interpreted
-explicitly because the bounded `/tmp` may be mounted noexec. Cleanup removed the run’s
-containers, networks, and volumes. A subsequent Docker check found no running `didcon-*`
-fixtures.
-
-Evidence logs: `/tmp/didcon-doctor-build.log` and `/tmp/didcon-doctor-workflows.log`.
-Actual IDE forwarding/settings, host quota coverage, sidecar privileges, and
-authenticated agent workflows remain separate validation tasks.
-
-## First attached-IDE checks (2026-10-24)
-
-The user's bind-mode test built successfully in VS Code `1.142.0` with Dev Containers
-`0.469.0`. The live container passed protected workspace/control mounts, dependency
-mounts, bounded scratch, tool/sandbox checks, and proxy TLS enforcement. Its failed
-doctor group came from reachable integration sockets, not volume or proxy configuration.
-The original focused check found X11, Git askpass, and four VS Code IPC paths. The group
-also counted those findings through the preflight’s aggregate host-integration failure.
-The separate overall doctor failure summarized the same underlying findings.
-
-Inspection found an additional live Wayland socket bind mount. Directory enumeration
-described its underlying regular-file placeholder while `stat` identified the mounted
-socket. Discovery now checks matching mounted objects rather than trusting the
-directory-entry file type. A regression test covers this mismatch among 13 passing Node
-tests. Running the updated checker from stdin inside the attached container also
-detected the Wayland mount and its alias. No display, credential, or editor protocol
-requests were sent.
-
-The installed extension metadata confirms application scope for
-`dev.containers.mountWaylandSocket` and machine scope for credential/Git-copy controls.
-The relevant Windows VS Code user settings were unset. With explicit user approval, the
-five documented host restrictions were applied while preserving unrelated settings. At
-this checkpoint, recreation had not verified their effect. Existing listeners remained
-accessible until service or container recreation. Core editor IPC retained failure
-status under the strict policy.
-
-Doctor remediation now names the focused check and explains the related overall failure.
-The two updated diagnostic scripts were also copied to the test project after checking
-for local changes. Host manifest validation passed. Rebuilding is required to install
-them under `/opt/scripts`. Real credential unavailability, disabled display forwarding
-after recreation, core IDE IPC isolation, and reconnect behavior remain unverified.
-
-## Rebuild follow-up: separate WSL forwarding control (2026-10-24)
-
-After recreation, inspection confirmed that the Wayland bind mount was removed. The
-initial follow-up identified the separate application-scoped
-`dev.containers.forwardWSLServices` setting and set it to false under the approved host
-restrictions. Further inspection corrected the assumption that this alone turns off X11.
-Dev Containers 0.469.0 always includes the primary CLI host among forwarding sources,
-including a WSL host. The setting excludes only an additional WSL forwarding host.
-
-The inspected extension skips automatic X11 relay creation when the container already
-has a nonempty DISPLAY. The template and proxy Compose generator now default DISPLAY to
-`disabled`, preserving explicit project overrides. The actual installed relay-creation
-code was exercised with stub hosts. It selected `/tmp/.X11-unix/X0` without DISPLAY and
-created no relay with `DISPLAY=disabled`. The fixture checked the startup decision.
-Actual denial after recreation still needs runtime verification. Doctor continues
-probing connections to detect listeners that remain after environment changes.
-
-The remaining live findings were X11, Git askpass, and four editor/control IPC paths.
-Doctor now consumes structured findings from the focused host check and includes socket
-paths directly in text/JSON reports. Raw helper messages and credential values remain
-suppressed. A normal failing preflight is no longer counted twice. An incomplete run
-still receives an overall failure for timeouts, missing summaries, truncated output, or
-unexplained exit status.
-
-Sixteen Node tests and 19 Python tests passed, including structured-finding redaction and
-the distinction between reported failures and incomplete runs. The updated focused
-checker also reproduced the remaining live socket findings in structured mode without
-modifying the container or sending protocol requests. The strict editor-IPC policy
-retains those failures. Listeners created during attachment require changes to their
-service or forwarding rather than build cache.
-
-All 16 diagnostic Node tests also passed in the user's running container runtime. The
-mount fixture now includes the proxy trust mount and explicitly tests its read-only
-requirement, so these tests work when `DIDCON_EGRESS_MODE=proxy` is inherited. The three
-updated diagnostic scripts were copied to `didcon-test` after checking them against the
-rebuilt image. Host manifest validation passed. They will be installed under
-`/opt/scripts` on its next ordinary cached rebuild.
-
-The final packaged workflow passed with `didcon-hardening-test:host-diagnostics`, built
-by layering the updated scripts onto the previously tested Node doctor image. It
-verified all 60 production preflight checks, live TLS enforcement, offline/strict modes,
-safe credential details, and exactly one failed doctor check for the exposed dummy
-fixture. The logs were `/tmp/didcon-host-diagnostics-build.log` and
-`/tmp/didcon-host-diagnostics-workflows.log`. The active attached test container was
-not restarted or modified by these fixture runs.
-
-## Exact socket approval workflow (2026-10-24)
-
-The broad IDE-mode proposal was replaced with host-managed, exact-path socket approvals.
-The host tool accepts copied doctor findings, displays the proposed changes, and
-requires typing `approve`. Cancellation and EOF leave the policy unchanged. Approved
-reachable paths produce warnings. Other checks retain their normal failure behavior. The
-policy is local to each project, excluded from image contexts and fresh setup copies,
-and preserved by patching.
-
-All 22 Node tests and 25 Python tests passed. They covered structured diagnostics,
-redaction, mounted-socket discovery, strict defaults, literal matching, both
-control-mount locations, writable shadow mounts, invalid/aliased policies,
-confirmation, listing/revocation, concurrent changes, and distribution behavior.
-
-The final packaged workflow passed using `didcon-hardening-test:socket-approvals`. Its
-baseline still passes all 60 production preflight checks, TLS enforcement, package/agent
-CLI workflows, and credential-fixture checks. Three harmless socket listeners verified
-the following approval behavior.
-
-- Default failure and approval of only one selected editor path, leaving the
-  unlisted display path failing.
-- Explicit approval of display and outside-scan paths, with actual connections
-  still attempted and accepted exposure reported as warnings in doctor and
-  standalone preflight summaries.
-- Strict-mode failure for warnings, denial of policy writes from the container,
-  and continued failure for host-connected credential-helper configuration.
-- Invalid policy rejection and restored socket failures after confirmed
-  revocation, without rebuilding or restarting the fixture container.
-
-Logs: `/tmp/didcon-socket-approvals-build.log` and
-`/tmp/didcon-socket-approvals-workflows.log`. The run removed its disposable
-containers, networks, and volumes. None of the user's sample socket paths were approved,
-and the attached project was not restarted. Actual display-relay prevention and socket
-behavior after a fresh IDE attachment/reconnect remain to be verified. Accepted exposure
-does not complete the socket-isolation task.
-
-## Storage limit diagnostics (2026-10-25)
-
-The unconditional storage-quota warning was replaced with observations per reviewed
-location and visible writable submount. Doctor recognizes read-only mounts and finite
-tmpfs byte capacity using kernel mount information and filesystem statistics. Persistent
-filesystem and Docker driver quotas are reported as unverified. A pass requires stronger
-evidence than free space or quota-related mount flags. JSON reports include
-`storageLimits`, with mount/type information, evidence or an unverified reason, and
-byte/inode bounds when available. Host mount sources and overlay configuration are
-excluded.
-
-All 31 Node tests and 27 Python tests passed. The storage regressions covered
-symlinks, escaped paths, writable dependency submounts, hidden mounts after a
-parent overmount, malformed/unavailable evidence, and false positives from
-ordinary filesystem capacity or quota flags. When all inspected locations have
-verified bounds, there is no automatic storage-quota warning.
-
-A disposable network-isolated container verified an actual 8 MiB tmpfs,
-read-only bind, symlink resolution, and a separate writable dependency volume
-that remains unverified beneath the bounded parent. No filesystem was filled.
-The packaged `didcon-hardening-test:storage-limits` workflow also passed the
-complete doctor checks, all 60 production preflight checks, package/tool
-workflows, and socket acknowledgment/revocation fixtures. Its storage assertions
-verified the real `/tmp` byte cap and the workspace's unverified quota status.
-
-Evidence logs were `/tmp/didcon-storage-limits-build.log` and
-`/tmp/didcon-storage-limits-workflows.log`. Repeat the checks with
-[`tests/test_storage_limits.js`](../../tests/test_storage_limits.js),
-[`tests/integration_storage_limits.js`](../../tests/integration_storage_limits.js), and
-the packaged workflow harness. The fixture containers and volumes were removed.
-Persistent quota enforcement, host storage consumers, and other writable paths outside
-the inspected locations still require separate verification.
-
-## Claude startup hostname (2026-10-25)
-
-The attached project's Claude launch failed with `ERR_PROXY_TUNNEL` for
-`platform.claude.com`. A public CONNECT probe reproduced HTTP 403 with the proxy's
-policy-denial marker. The hostname was absent from both the repository and target
-allowlists. Anthropic's documented startup/authentication endpoint was added as an exact
-source-policy entry. TLS inspection and the other restrictions remained enabled.
-
-The new credential-free workflow probe runs under the Claude Island profile. The old
-policy reproduced the live failure. `api.anthropic.com` returned HTTP 404 over verified
-HTTPS, while `platform.claude.com` received HTTP 403 at CONNECT. With the source fix in
-the disposable topology, both verified HTTPS requests completed and the platform
-returned HTTP 200. Proxy denials are explicitly distinguished from upstream HTTP
-responses so a denied tunnel cannot pass.
-
-The packaged workflow, all 60 production preflight checks, and the socket acknowledgment
-fixtures also passed. Evidence is in `/tmp/didcon-claude-startup-workflows.log`. These
-tests do not authenticate an account, retrieve credentials, submit a model request, or
-establish that every optional Claude feature is reachable. Existing projects need a
-reviewed policy update and proxy restart as described in the hardening guide.
-
-## Kernel ABI recheck (2026-10-25)
-
-A read-only kernel query in the current workspace returned Landlock ABI 7 on
-`6.18.54.1-microsoft-standard-WSL2` (`x86_64`). The query used
-`landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)`, matching the
-[native probe](../scripts/landlock-abi.rs). The earlier ABI 3 result belongs to the
-2026-10-24 environment. Profiles still request ABI 6. Run `didcon-doctor` in each target
-container to record its kernel ABI and check the active configuration.
+Profiles request ABI 6. Doctor warns when the measured kernel ABI is lower. A newer
+kernel alone does not add pathname Unix-socket isolation to these profiles. Verify the
+handled rights and actual connection denial before claiming that protection.
 
 ## Remaining work
 
-1. Extend the passing Node workflow checks to Go, Rust, Zig, Blender/uv, actual
-   agent API/authentication paths, and the optional herdr multiplexer before
-   narrowing temporary-file grants.
-2. Validate the implemented opt-in credential-fill check against a disposable
-   host-forwarded fixture after IDE attachment and reconnect. Local helper exposure,
-   denial, and redaction already have passing fixtures.
-3. Validate actual IDE attach/reconnect, forwarding controls, root placeholder
-   selection, and volume editing/rebuild behavior.
-4. Build and exercise Go, Rust, Zig, and Blender variants and their toolchains.
-5. Validate the shared scratch hierarchy across the remaining runtime matrix before
-   reducing `/tmp` grants. Retain the documented ABI 6 socket limitation.
+The broader acceptance checks remain open in the
+[hardening checklist](../../harden-1-checklist.md). They include the following areas.
 
-Client DNS is denied in the selected proxy architecture. A client dnsmasq/ipset resolver
-is deferred for the optional legacy-firewall path. Kata is deferred until a suitable
-Linux/KVM host and runtime are available. Storage outside `/tmp` requires documented
-host quotas and further verification of enforced bounds.
+- Go, Rust, Zig, Blender/uv, authenticated agent requests, and the optional herdr
+  multiplexer.
+- Host-forwarded disposable credential denial after IDE attachment and reconnect.
+- Display forwarding denial, editor IPC authority, reconnect behavior, root
+  configuration selection, and volume editing/rebuild workflows.
+- Temporary-file compatibility across direct and nested tool launches before reducing
+  the existing `/tmp` grants.
+- Persistent quotas and host storage consumers outside doctor's inspected paths.
 
-## Local recovery logs
+Client DNS is denied in proxy mode. A filtered client resolver remains deferred for
+legacy firewall mode. Kata evaluation requires a suitable Linux/KVM host and runtime.
 
-The completed integration output was recovered from `/tmp/didcon-mount-validation.log`,
-`/tmp/didcon-volume-validation.log`, and `/tmp/didcon-proxy-validation.log`. These logs
-were temporary evidence and may no longer be available. Use the scripts above to repeat
-the checks.
+## Reporting results
+
+Record the tested repository revision, commands, workspace mode, image variant, and
+passed, failed, or skipped checks. Keep detailed environment inventories and raw logs
+with the local test evidence. Review reports before sharing them because diagnostic
+socket paths can identify local sessions. Exclude credentials, helper responses, proxy
+CA private keys, and project-specific paths from public reports.

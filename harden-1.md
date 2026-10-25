@@ -7,7 +7,7 @@ route external traffic through a TLS-inspecting proxy. Node image and disposable
 integration checks have passed. Broader IDE, authenticated agent, non-Node, storage, and
 temporary-file compatibility checks remain open. Use the
 [task checklist](harden-1-checklist.md) and
-[validation record](.devcontainer/docs/hardening-validation.md) to assess completion.
+[validation guide](.devcontainer/docs/hardening-validation.md) to assess completion.
 
 The 2026-10-24 proxy checkpoint uses Smokescreen commit
 `68e7b8218e226bc47d09ce705fdb8fed82145ceb` with a didcon wrapper. It requires matching
@@ -27,8 +27,8 @@ a Linux/KVM host can validate it.
 This report draws on the [didcon source](https://github.com/kozmof/didcon), upstream
 documentation, and Kata Containers 4.2.0 source. The original review was updated on
 2026-10-24. Where stated, the risk tables describe the earlier bind-workspace and
-in-container firewall baseline. Consult the validation record for dated implementation
-results and remaining checks.
+in-container firewall baseline. Consult the validation guide for reproducible checks,
+their coverage, and remaining work.
 
 ## Current defense layers
 
@@ -274,8 +274,9 @@ configuration, and verify storage bounds for every allocation whose exhaustion c
 harm the host.
 
 Track the remaining IDE, tool, quota, DNS, socket, volume, and optional Kata checks in
-the [task checklist](harden-1-checklist.md). Record acceptance evidence in the
-[validation record](.devcontainer/docs/hardening-validation.md).
+the [task checklist](harden-1-checklist.md). Use the
+[validation guide](.devcontainer/docs/hardening-validation.md) to reproduce the checks.
+Keep detailed environment-specific evidence with the local test results.
 
 ## Sources
 

@@ -10,7 +10,7 @@ and host isolation need separate verification.
 | Environment | An Alpine-based development container |
 | Test date | 2026-04-11 |
 | Result | No filesystem bypass found in the recorded probes |
-| Current operations | [Hardening guide](hardening.md) and [validation record](hardening-validation.md) |
+| Current operations | [Hardening guide](hardening.md) and [validation guide](hardening-validation.md) |
 
 ### Later implementation updates
 
