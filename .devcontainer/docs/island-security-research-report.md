@@ -1,65 +1,52 @@
 # Island (Landlock LSM) Security Research Report
 
-**Target:** [`landlock-lsm/island`](https://github.com/landlock-lsm/island) sandboxing Claude Code  
-**Environment:** Simple devcontainer (Alpine-based)  
-**Date:** 2026-04-11  
-**Result:** **Historical point-in-time Landlock test; not a complete container security audit.**
-> **2026-10-24 implementation update:** New setup defaults use targeted host control
-> mounts, an optional volume workspace with Git-object exports, an npx shim, and
-> an external TLS-inspecting proxy with a separate network guard. See Section 9
-> and [the hardening guide](hardening.md) for current behavior and validation limits.
+This report records filesystem tests against an already-sandboxed Claude Code child
+process on 2026-04-11. The observed denials apply to those probes and that environment.
+They do not establish complete container or host isolation.
 
-> **2026-06-20 security update:** The original conclusion below covered an already-sandboxed Claude child process only.
-> It did not establish that VS Code extensions, arbitrary dev-user processes, the writable workspace bind mount, build inputs, or egress were secure.
-> The hardened configuration pins installer inputs, verifies Go and Safe-chain downloads, keeps tool installations and Island profiles root-owned, isolates agent state, restricts allowlisted egress to TCP/443, and adds CPU/memory limits.
-> Remaining limitations are documented in Section 8.
+| Item | Recorded scope |
+| --- | --- |
+| Target | [`landlock-lsm/island`](https://github.com/landlock-lsm/island) around Claude Code |
+| Environment | An Alpine-based development container |
+| Test date | 2026-04-11 |
+| Result | No filesystem bypass found in the recorded probes |
+| Current operations | [Hardening guide](hardening.md) and [validation record](hardening-validation.md) |
 
-> **2026-08-01 host-boundary audit and hardening:** Active testing found that the
-> container had no visible Docker socket or SUID/SGID binaries, could not enter
-> PID 1 namespaces, and could not reach the Docker gateway or cloud metadata.
-> It also found three host-facing risks outside the original Landlock scope:
-> writable Git/devcontainer control files, arbitrary recursive DNS, and
-> connectable VS Code/X11/Remote Containers sockets. The configuration now
-> bind-mounts `.devcontainer`, `.git/config`, and `.git/hooks` read-only,
-> keeps agent installations root-owned, pins the Island build to a commit SHA, fails startup on
-> firewall deny-test or IPv6-policy failure, and makes preflight nesting-aware.
->
-> These changes do not make a writable host checkout safe for fully malicious
-> code. Project scripts and source files can still be changed and later run on
-> the host. DNS remains an exfiltration channel, and editor/X11 IPC remains
-> reachable because the development environment exposes sockets beneath
-> `/tmp`. Strong isolation requires a container-volume checkout with reviewed
-> patch export, plus removal or mediation of host IPC and DNS.
+### Later implementation updates
 
-> **2026-08-02 build and startup fixes:** Three defects surfaced on a WSL2 host,
-> two of them in the startup checks the section above relies on.
->
-> The Island build dropped `--locked`. Upstream publishes no `Cargo.lock`, so the
-> flag pinned nothing; it only made the base image's `cargo-auditable` wrapper
-> abort when its `cargo metadata` call tried to create the missing lock file.
-> `ISLAND_REV` remains the pin.
->
-> The firewall now probes for a working `ip6tables` backend (default, then
-> `-nft`, then `-legacy`) instead of assuming the default. That default is the
-> legacy backend, which needs the `ip6table_filter` kernel module; hosts without
-> it — WSL2 among them — could not install the IPv6 block-all rules at all, and
-> the container failed to start. The rules are unchanged and still fail closed:
-> if no backend works, setup aborts rather than leaving IPv6 unfiltered.
->
-> The startup deny-test now passes `--no-hsts` to every `wget` probe. Without it,
-> the HTTPS reachability check recorded GitHub's HSTS policy, and the port-80
-> check that follows was silently upgraded to HTTPS — so it passed while never
-> testing port 80. Port 80 was in fact blocked, but the check could not have
-> detected it otherwise.
+The June 2026 hardening pinned selected installer inputs and download hashes, made tools
+and policies root-owned, isolated agent state, restricted IP egress to TCP/443, and
+added CPU/memory limits. These changes did not place editor extensions or arbitrary
+dev-user processes inside the tested Landlock domain. Section 8 describes that earlier
+security model.
 
+The 2026-08-01 host review found no visible Docker socket or SUID/SGID binaries. Its
+tested PID namespace, Docker gateway, and metadata accesses were denied. It also found
+writable control files, recursive DNS, and reachable editor/display sockets. Read-only
+control mounts and stricter startup checks addressed some paths, while writable source
+and forwarded IPC remained separate risks.
 
----
+The 2026-08-02 build and startup fixes addressed three defects.
+
+- The island build removed `--locked` because upstream supplied no `Cargo.lock` and the
+  builder’s cargo-auditable metadata step failed. `ISLAND_REV` pins source while
+  dependency resolution remains unpinned.
+- Legacy firewall startup began testing the default, nft, and legacy ip6tables backends.
+  Missing IPv6 support stops startup instead of leaving egress open.
+- Startup wget probes added `--no-hsts` so a previous HTTPS response could not upgrade
+  the port-80 denial test to HTTPS.
+
+The October implementation adds protected Git/editor control mounts, an optional volume
+workspace with Git-object exports, an npx shim, and an external TLS-inspecting proxy
+with a separate network guard. Section 9 records those changes and their validation
+limits.
 
 ## 1. Environment Discovery
 
 ### Island Environment Variables
 
-Island applies full XDG directory isolation — every config, data, cache, state, and runtime path is remapped to an application-specific directory:
+The tested profile redirected these environment paths into application-specific
+directories. These values describe the April environment.
 
 | Variable | Value |
 |---|---|
@@ -71,11 +58,14 @@ Island applies full XDG directory isolation — every config, data, cache, state
 | `TMPDIR` | `/tmp/island-tmp-1000-claude-code-02oXIE` |
 | `CLAUDE_CONFIG_DIR` | `/home/dev/.config/island-config-profiles/claude-code` |
 
-This means Claude Code cannot read the real user `~/.config`, `~/.local`, or standard `$TMPDIR` — it only sees its own isolated copies.
+Environment redirection selects application state locations. Filesystem access depends
+on the Landlock policy as well. These variables alone do not establish that unrelated
+home or temporary paths are inaccessible.
 
 ### Git Wrapper
 
-`/usr/local/bin/git` is a shell wrapper that runs git inside an additional sub-sandbox:
+The tested container supplied a Git wrapper at `/usr/local/bin/git`. It added the
+`git-workspace` domain around Git and its children.
 
 ```sh
 #!/bin/sh
@@ -87,7 +77,9 @@ This means Claude Code cannot read the real user `~/.config`, `~/.local`, or sta
 exec island run -p git-workspace -- /usr/bin/git "$@"
 ```
 
-Using `/usr/bin/git` directly does bypass the git-specific sub-sandbox (and its hook protections), but does **not** bypass the Claude Code sandbox itself — `/usr/bin/git` also cannot access `/var/log`.
+Direct `/usr/bin/git` execution skips the Git-specific domain. A process already inside
+the Claude Code domain retains its outer restrictions. The recorded direct Git probe
+still received a denial for `/home/dev/.gitconfig`.
 
 ---
 
@@ -114,7 +106,8 @@ Using `/usr/bin/git` directly does bypass the git-specific sub-sandbox (and its 
 | `cat /proc/version` | `Permission denied` |
 | `ls /proc/` | `Permission denied` |
 
-> **Note:** Even `/proc/self` is fully restricted — stricter than the default island template, which would allow `/proc/self` read access.
+The recorded `/proc/self` probes were denied. This is historical evidence. Current
+profiles explicitly grant selected proc paths.
 
 ### 2.3 Symlink Bypass — BLOCKED
 
@@ -137,14 +130,15 @@ Landlock follows symlinks to their resolved target. Creating a symlink inside `/
 
 ### 2.5 Compiled Native Binary — BLOCKED
 
-A C program was compiled and executed that directly calls `opendir("/var/log")`:
+The compiled C probe called `opendir("/var/log")` directly.
 
 ```bash
 gcc -o /tmp/test_bypass_bin /tmp/test_bypass.c
 /tmp/test_bypass_bin   # → opendir: Permission denied
 ```
 
-This confirms the restriction is at the **kernel level** (Landlock LSM), not in any userspace layer. Landlock's `seccomp`-like enforcement happens in the VFS layer.
+The native probe received the same denial as the interpreted probes. This is consistent
+with kernel-enforced filesystem restrictions.
 
 ### 2.6 Namespace Escape (nsenter) — BLOCKED
 
@@ -153,7 +147,8 @@ nsenter --mount=/proc/1/ns/mnt ls /var/log
 # → nsenter: can't open '/proc/1/ns/mnt': Permission denied
 ```
 
-Access to `/proc/1/` (and `/proc/` in general) is denied, making namespace escape impossible.
+The attempt failed while opening `/proc/1/ns/mnt`. It does not establish that every
+namespace or kernel escape route is unavailable.
 
 ### 2.7 Chroot — BLOCKED
 
@@ -177,47 +172,53 @@ find /bin /usr/bin /usr/local/bin -perm -4000
 # → (no output)
 ```
 
-No SUID binaries were found. Even if they existed, Landlock restrictions apply to all processes regardless of UID/EUID — Landlock is not privilege-aware.
+The scan found no SUID binaries in the three searched directories. Inherited Landlock
+restrictions persist across credential changes, but this scan does not cover every
+privileged executable or kernel attack surface.
 
 ### 2.10 Island Profile Creation — BYPASS INEFFECTIVE
 
-Island profiles can be created within the isolated `XDG_CONFIG_HOME`. A profile named `testprofile` was created with:
+The test created a new profile within the redirected configuration directory.
 
 ```bash
 island create testprofile   # → Created profile in ...profiles/testprofile
 ```
 
-Running a command under a new permissive profile still fails:
+The nested profile still received a denial for `/var/log`.
 
 ```bash
 island run -p testprofile -- ls /var/log
 # → ls: can't open '/var/log': Permission denied
 ```
 
-**Why:** Landlock restrictions are additive and irreversible. The parent process (the Claude Code bash shell) already has Landlock rules that deny `/var/log`. Any child process spawned by `island run` inherits those restrictions and can only add further restrictions — it cannot remove or relax the parent's rules.
-
-This is a fundamental property of Landlock (unlike `setuid`, there is no way to escape an inherited Landlock domain).
+The child inherited the parent’s Landlock domain. Adding another ruleset could only
+retain or reduce its access. See the
+[Landlock inheritance model](https://docs.kernel.org/userspace-api/landlock.html).
 
 ---
 
 ## 3. Accessible Attack Surface
 
-While no bypass was found, these surfaces are accessible:
+The April record also identified the following permitted resources.
 
 ### Filesystem (Allowed)
+
 - `/bin`, `/usr/bin`, `/usr/local/bin`, `/usr/lib`, `/lib` (read/execute)
 - `/etc` (read)
-- `/tmp` (read/write — but only the isolated `$TMPDIR`)
-- `/workspace` (read/write — the project directory)
-- `/home/dev/.config/island-config-profiles/claude-code/` (read/write — isolated config)
+- The redirected `$TMPDIR` for scratch files. The record does not establish denial of
+  every other path under `/tmp`.
+- `/workspace` for project reads and writes.
+- `/home/dev/.config/island-config-profiles/claude-code/` for application config.
 - `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/full` (read/write)
 
 ### Network (Allowed)
-- TCP connections to localhost and remote hosts are **allowed**
-- VSCode IPC socket (`/tmp/vscode-ipc-*.sock`) — **connectable**
-- Codex IPC socket (`/tmp/codex-ipc/ipc-1000.sock`) — **accessible**
 
-> The network being allowed means Claude Code could exfiltrate data to external services — but this is a network policy concern, not a Landlock bypass.
+- TCP connections to localhost and remote hosts are allowed
+- VSCode IPC socket (`/tmp/vscode-ipc-*.sock`) — connectable
+- Codex IPC socket (`/tmp/codex-ipc/ipc-1000.sock`) — accessible
+
+Permitted TCP and IPC access provided communication paths outside the tested filesystem
+denials. The later network and host-integration controls need their own verification.
 
 ---
 
@@ -232,12 +233,15 @@ Host OS
                 └── island run -p profile (child gets MORE restrictions, not fewer)
 ```
 
-Key design properties confirmed:
-1. **Kernel enforcement**: Landlock operates in the VFS layer — no userspace bypass is possible.
-2. **Inherited and monotonically tightening**: All child processes inherit the sandbox. Restrictions can never be relaxed.
-3. **Language/runtime agnostic**: C, Perl, Node.js, bash — all get the same EACCES.
-4. **Privilege agnostic**: SUID, root — Landlock applies regardless.
-5. **Symlink-aware**: Landlock resolves symlinks before checking rules.
+The probes support the following observations.
+
+1. Native and interpreted filesystem probes received denials.
+2. The nested island profile retained the parent’s restrictions.
+3. A symlink in permitted scratch did not grant access to its denied target.
+
+Inherited domains also persist across credential changes under Landlock’s model. These
+properties do not constitute a proof against kernel vulnerabilities or untested access
+paths.
 
 ---
 
@@ -245,22 +249,27 @@ Key design properties confirmed:
 
 | Category | Finding |
 |---|---|
-| **Bypass found** | No |
-| **Landlock effectiveness** | Full — all filesystem bypass attempts blocked |
-| **Inheritance enforcement** | Confirmed — child processes cannot escape parent sandbox |
-| **Environment isolation** | Strong — XDG dirs, TMPDIR, CLAUDE_CONFIG_DIR all remapped |
-| **Git protection** | Git wrapper adds a sub-sandbox for hook protection; bypassable via `/usr/bin/git` (by design) |
-| **Network** | Allowed — not restricted by Landlock in this profile |
-| **Attack surface note** | VSCode IPC and codex IPC sockets accessible; TCP unrestricted |
+| Bypass found | No |
+| Landlock effectiveness | Recorded filesystem probes were denied. Python was unavailable. |
+| Inheritance enforcement | The nested command retained its inherited domain. |
+| Environment redirection | XDG paths, TMPDIR, and CLAUDE_CONFIG_DIR were remapped. Access isolation depends on policy. |
+| Git protection | Wrapped Git adds a domain. Direct `/usr/bin/git` skips that extra domain. |
+| Network | Allowed — not restricted by Landlock in this profile |
+| Attack surface note | VS Code and Codex IPC were accessible. TCP was unrestricted in the tested profile. |
 
 ---
 
 ## 6. Recommendations
 
-1. **Network restriction**: Consider adding TCP/UDP Landlock rules (Landlock ABI v4+ supports `bind_tcp`/`connect_tcp`) to limit outbound connections if threat model includes data exfiltration.
-2. **VSCode socket exposure**: The VSCode IPC socket is accessible from the sandbox. Depending on the VSCode IPC protocol's capabilities, this may warrant investigation.
-3. **Profile documentation**: The lack of an island profiles directory at startup (`ProfilesDirectory NotFound`) means `island status` fails inside the sandbox — making it hard to inspect what profile is actually applied. Exposing a read-only view of the active profile would improve auditability.
-4. **Git sub-sandbox bypass note**: The intentional `/usr/bin/git` bypass in the git wrapper comment should be documented as a known trade-off (it allows escaping git hook protection, not the main sandbox).
+These recommendations interpret the historical results using the current model.
+
+1. Verify network enforcement separately. Landlock ABI 4 adds TCP port rules. The tested
+   ABI 6 profile model does not provide UDP port filtering.
+2. Inventory reachable editor sockets and test the authority exposed by each.
+3. Make the active profile available for inspection without granting writes to
+   enforcement assets. The recorded `ProfilesDirectory NotFound` error prevented
+   `island status` from inspecting it inside the sandbox.
+4. Document direct tool invocation paths and test inherited restrictions.
 
 ---
 
@@ -268,7 +277,11 @@ Key design properties confirmed:
 
 ### How It Works
 
-Claude Code ships a git wrapper at `/usr/local/bin/git` that wraps every `git` invocation inside an additional island sub-sandbox:
+Didcon supplies the wrapper shown in Section 1. It runs the resolved `git` command
+through `island run -p git-workspace`. The current [shim](../scripts/shims/git) also
+fixes the island configuration path.
+
+The historical wrapper was as follows.
 
 ```sh
 #!/bin/sh
@@ -280,7 +293,7 @@ Claude Code ships a git wrapper at `/usr/local/bin/git` that wraps every `git` i
 exec island run -p git-workspace -- /usr/bin/git "$@"
 ```
 
-This creates a **two-layer sandbox** for git operations:
+The Git-specific domain nests inside the already-running agent domain.
 
 ```
 Claude Code sandbox (Landlock)
@@ -291,23 +304,26 @@ Claude Code sandbox (Landlock)
 
 ### Threat Model
 
-The git sub-sandbox specifically targets **malicious git hooks**. A compromised or attacker-crafted repository could contain hooks (e.g. `.git/hooks/post-checkout`, `pre-commit`) that execute arbitrary code. Without the sub-sandbox, a hook running inside the Claude Code sandbox could still read sensitive files the Claude Code profile permits — most importantly:
+Git hooks execute within the permissions of the Git process. The additional
+`git-workspace` domain can reduce those permissions further. Current policy omits
+private SSH key paths and agent state while permitting `/workspace`, `/tmp`, and read
+access to `/home/dev/.gitconfig`.
 
-- `~/.ssh/` private keys (used for SSH remote authentication)
-- `~/.gitconfig` credentials or tokens
-- Other secrets within the Claude Code sandbox's allowed paths
-
-The `git-workspace` profile restricts these paths from git's perspective, so hook payloads cannot exfiltrate them even if they execute.
+A direct Git invocation retains whichever outer domain already applies. It does not
+automatically gain access to SSH keys. Secrets in permitted project, scratch, or Git
+config paths can remain exposed. Consult the
+[current Git policy](../island/profiles/git-workspace/landlock/policy.toml) for its
+actual grants.
 
 ### Known Bypass: `/usr/bin/git`
 
-The bypass is **intentional and documented in the wrapper script itself**:
+The historical wrapper documented its direct invocation path.
 
 ```sh
 # To bypass the sandbox, use the full path: /usr/bin/git
 ```
 
-Using `/usr/bin/git` directly runs git without the `git-workspace` sub-sandbox. This was observed during research:
+The research recorded this direct Git invocation and its error output.
 
 ```bash
 /usr/bin/git -C / ls-files /var/log
@@ -315,76 +331,87 @@ Using `/usr/bin/git` directly runs git without the `git-workspace` sub-sandbox. 
 # fatal: not a git repository ...
 ```
 
-Note that `/usr/bin/git` still operates within the **outer Claude Code sandbox** — it cannot access `/var/log` or other restricted paths. The bypass only removes the extra hook-protection layer.
+The direct path skips the Git-specific domain while retaining any outer agent
+restrictions. The recorded error shows Git config denial and a non-repository
+invocation. It is not a separate `/var/log` read test.
 
-**Why it is intentional:** Some legitimate git operations (e.g. complex worktree setups, git maintenance) may fail under the stricter `git-workspace` profile. The escape hatch allows users to run these operations when needed, at the cost of reduced hook isolation.
+Use the direct path only for reviewed operations that cannot use the wrapper. Its
+documented availability means the shim alone cannot enforce a mandatory Git boundary
+against hostile code.
 
 ### Risk Assessment
 
 | Scenario | Risk |
 |---|---|
-| User types `git clone <repo>` (hooks fire) | **Mitigated** — wrapper enforces `git-workspace` profile |
-| User types `/usr/bin/git clone <repo>` (hooks fire) | **Not mitigated** — hooks run in Claude Code sandbox only |
+| A hook runs through wrapped `git` | Git-specific and any outer agent restrictions apply. |
+| A hook runs through `/usr/bin/git` | Only existing outer restrictions apply. |
 | Claude Code runs `git` internally | Depends on which binary Claude Code resolves via `$PATH` |
-| Hook tries to read `~/.ssh/id_rsa` | Blocked by `git-workspace` profile; not blocked via `/usr/bin/git` |
+| Hook tries to read `~/.ssh/id_rsa` | The current Git and agent policies omit that key path. Direct Git does not remove an outer denial. |
 | Hook tries to read `/workspace` files | Allowed in both cases (workspace is a permitted path) |
 
 ### Recommendations for the Git Sub-Sandbox
 
-1. **Harden `$PATH` ordering**: Ensure `/usr/local/bin` (the wrapper) always precedes `/usr/bin` in `$PATH` so that `git` always resolves to the wrapper. Verify this cannot be changed by the sandboxed process.
-2. **Remove or gate the bypass comment**: The in-code `# To bypass the sandbox, use the full path: /usr/bin/git` comment teaches users to reduce their own security. Consider removing it or replacing it with a warning about the trade-off.
-3. **Restrict `/usr/bin/git` execution**: If the `git-workspace` profile can add a rule blocking exec of `/usr/bin/git` directly (requiring the wrapper), that would close this escape hatch without removing functionality — users would need to explicitly modify the profile to run bare git.
-4. **Log wrapper bypasses**: Island could emit a warning (to a log outside the sandbox) whenever `/usr/bin/git` is executed directly, providing an audit trail for intentional bypass uses.
+1. Keep `/usr/local/bin` before `/usr/bin` for normal command resolution. PATH ordering
+   is a convenience and can be bypassed with an absolute path.
+2. Preserve the direct-path warning so users can assess the reduced isolation.
+3. Enforce any mandatory Git boundary outside command-name resolution. The wrapper needs
+   to execute `/usr/bin/git`, so denying that binary within its own profile would break
+   the wrapped path too.
+4. Evaluate external execution auditing if bypass records are required. Current shims do
+   not provide a complete audit of direct invocations.
 
 ---
 
 ## 8. Security Model Before the October Hardening (2026-06-20)
 
-The devcontainer is defense in depth, not a boundary for mutually untrusted code running as `dev`.
+The devcontainer is defense in depth, not a boundary for mutually untrusted code running
+as `dev`.
 
 - Island is enforced for normal CLI invocations through root-owned shims and root-owned profiles.
 - VS Code agent extensions are excluded by default because extension hosts do not inherit CLI Landlock domains.
 - The host workspace remains a writable bind mount. Sandboxed agents can intentionally modify or delete project files.
 - Any deliberately unsandboxed command executed as `dev` retains the normal dev-user access available inside the container.
-- The egress firewall is an IP allowlist restricted to TCP/443. Shared hosting and approved APIs are still possible exfiltration destinations; this is not data-loss prevention.
+- Legacy egress used an IP allowlist on TCP/443. Shared hosting and approved APIs
+  remained possible exfiltration destinations.
 - DNS is available through Docker embedded DNS over loopback. A domain-aware authenticated proxy would provide stronger destination enforcement.
 - The Chainguard free-tier base images still use moving `latest-dev` tags. Production rebuilds should resolve and review immutable digests in CI.
 - Direct paths to underlying tools remain an explicit administrative bypass. Do not use them with untrusted repositories.
 - Availability protection is bounded by PID, memory, and CPU limits, but the writable workspace can still be filled or damaged.
 
-- Landlock TCP filtering requires kernel ABI v4 (Linux 6.7 or newer). On older kernels, the external firewall is the port-enforcement layer; preflight and startup tests must be reviewed after each rebuild.
+- TCP port filtering requires Landlock ABI 4. On older kernels, firewall rules supply
+  that enforcement. Review preflight and startup results after rebuilds.
 
 The intended threat model is accidental or malicious behavior in agent-spawned child processes and package hooks. It does not treat the `dev` account, the Docker daemon, the kernel, approved remote services, or the host-mounted project as untrusted principals.
 
 ## 9. October Hardening Implementation (2026-10-24)
 
-New setup defaults use a generated Compose topology. A separate network-guard
-container owns the development network's firewall rules; the development
-container has no NET_ADMIN or NET_RAW. Its only external path is the
-TLS-inspecting proxy on TCP/443. The proxy validates exact CONNECT destinations,
-client SNI, decrypted HTTPS authority, and public IPv4 resolutions pinned for
-each upstream connection. The private CA key is isolated in a proxy-only volume.
-Client Docker DNS and non-loopback IPv6 are denied. Legacy in-container IP
-filtering remains an explicit setup option with its earlier residual risks.
+New setup defaults use a generated Compose topology. A separate network-guard container
+owns the development network’s firewall rules. The development container has no
+NET_ADMIN or NET_RAW. Its only external path is the TLS-inspecting proxy on TCP/443. The
+proxy validates exact CONNECT destinations, client SNI, decrypted HTTPS authority, and
+public IPv4 resolutions pinned for each upstream connection. The private CA key is
+isolated in a proxy-only volume. Client Docker DNS and non-loopback IPv6 are denied.
+Legacy in-container IP filtering remains an explicit setup option with its earlier
+residual risks.
 
 Host preparation freezes the bind-mode Git layout. Read-only mounts protect
-editor/lifecycle configuration, Git config/hooks/info, `.gitmodules`, and
-submodule `.git` pointers. Writable ancestor-directory binds prevent replacing
-protected trees by renaming their parents. Ordinary Git data remains writable.
-Unsupported worktree, include, hook-path, symlink, and hardlink layouts are
-rejected in bind mode. Volume mode keeps the host checkout outside the writable
-workspace and seeds/exports Git objects without importing host-local config or
-hooks. Accepted code still needs review before host execution.
+editor/lifecycle configuration, Git config/hooks/info, `.gitmodules`, and submodule
+`.git` pointers. Writable ancestor-directory binds prevent replacing protected trees by
+renaming their parents. Ordinary Git data remains writable. Unsupported worktree,
+include, hook-path, symlink, and hardlink layouts are rejected in bind mode. Volume mode
+keeps the host checkout outside the writable workspace and seeds/exports Git objects
+without importing host-local config or hooks. Accepted code still needs review before
+host execution.
 
-The npx shim applies npm-workspace restrictions to normal terminal launches.
-Dependency volumes isolate configured installation paths; a bounded `/tmp`
-tmpfs reduces one storage-exhaustion path. Other writable storage still needs
-quotas. Agent and tool TMPDIR values now use `/tmp/didcon` and its agent-specific
-subdirectories, initialized with dev ownership and mode 0700 in the bounded
-tmpfs. This fixes a reproduced nested-npm scratch-path denial. Existing shared
-`/tmp` profile grants remain until the full compatibility matrix is validated.
-Landlock ABI 6 does not deny known pathname Unix-socket connections; filesystem
-grant removal alone would not provide that protection.
+The npx shim applies npm-workspace restrictions to normal terminal launches. Dependency
+volumes separate selected installations from the host checkout. The bounded `/tmp` tmpfs
+limits scratch storage. Other writable storage still needs quotas. Agent and tool TMPDIR
+values now use `/tmp/didcon` and its agent-specific subdirectories, initialized with dev
+ownership and mode 0700 in the bounded tmpfs. This fixes a reproduced nested-npm
+scratch-path denial. Existing shared `/tmp` profile grants remain until the full
+compatibility matrix is validated. Landlock ABI 6 lacks pathname Unix-socket connection
+restrictions. Verify forwarding removal or another enforced boundary through actual
+connection tests.
 
 Disposable Docker tests cover mount write/remove/rename denial, root and
 submodule commits, dependency isolation, npx inheritance, volume seeding and

@@ -2,9 +2,10 @@
 
 Status: proposed, not implemented. Recorded on 2026-10-24.
 
-This plan extends the [socket security review](socket-security.md). It does not
-close the [remaining validation work](hardening-validation.md#remaining-work) or
-claim that the current setup isolates packages from editor sockets.
+This plan proposes separate execution environments for editors, agents, and project
+packages. It extends the [socket security review](socket-security.md). Current
+protections and [open validation tasks](hardening-validation.md#remaining-work) remain
+as recorded until implementation and boundary tests pass.
 
 ## Objective and limits
 
@@ -12,16 +13,15 @@ Treat project dependencies and project-controlled commands as potentially
 malicious. Restrict the resources they can affect even when scanning fails to
 identify them as malicious.
 
-The intended security claims are specific: package execution cannot reach
-editor/host integration sockets, read protected host or agent credentials,
-modify protected launch/control files, or control the container engine.
-Each claim requires tests against the actual execution boundary.
+The proposed boundary must deny package access to editor and host integration sockets,
+protected host and agent credentials, launch and control files, and the container
+engine. Test each denied operation from the actual package environment before claiming
+containment.
 
-Socket isolation alone cannot make a malicious dependency harmless. Within its
-allowed environment, a package can still corrupt writable files, change build
-results, consume resources up to their limits, and use permitted network access.
-An allowlisted destination may also accept uploads; hostname enforcement does
-not establish that transmitted data is safe.
+Socket isolation alone cannot make a malicious dependency harmless. Within its allowed
+environment, a package can still corrupt writable files, change build results, consume
+resources up to their limits, and use permitted network access. Permitted destinations
+can accept uploads, so hostname enforcement cannot prevent all data exfiltration.
 
 The baseline assumes the host, container engine, protected launcher, and approved
 agent/editor binaries are trusted. Kernel/runtime exploits and compromise of
@@ -31,19 +31,21 @@ injection. Package isolation does not eliminate that risk.
 
 ## Why separating agents alone is insufficient
 
-Package code executes through more paths than an agent's shell command:
+Inventory every route that can execute package code, including editor tools and commands
+outside the agent shell.
 
 | Execution path | Required treatment |
 | --- | --- |
 | Installation and lifecycle hooks | Execute in the package sandbox, including their children. |
-| `npx`, package binaries, tests, builds, and application runtime | Use the same containment boundary; a later import or execution can activate a dependency without an installation hook. |
+| `npx`, package binaries, tests, builds, and application runtime | Run imports, package binaries, tests, builds, and apps inside the same boundary as install hooks. |
 | Linters, formatters, language-server plugins, debugging, and editor tasks | Route project-controlled execution into the sandbox or disable the integration in strict mode. |
-| Agent tools, project configuration, plugins, and helper processes | Inventory which paths can execute project code in the credential-bearing agent runtime; enforce separation or report the path unsupported. |
-| Files returned to the editor or host | Keep them untrusted until reviewed; reading a result does not authorize executing it. |
+| Agent tools, project configuration, plugins, and helper processes | Identify project-code execution in the agent runtime. Enforce separation or report the path unsupported. |
+| Files returned to the editor or host | Require review before executing returned files in a more privileged context. |
 
 npm installation can execute lifecycle scripts, and editor features can execute
-workspace-provided programs. Disabling installation scripts covers only part of
-this surface. [npm lifecycle documentation](https://docs.npmjs.com/cli/v11/using-npm/scripts/),
+workspace-provided programs. Disabling installation scripts covers only part of this
+surface.
+[npm lifecycle documentation](https://docs.npmjs.com/cli/v11/using-npm/scripts/),
 [VS Code Workspace Trust](https://code.visualstudio.com/docs/editing/workspaces/workspace-trust).
 
 A worker that also receives agent credentials still exposes those credentials
@@ -53,9 +55,9 @@ context. Both paths must be addressed before claiming containment.
 
 ## Proposed execution boundaries
 
-The initial candidate uses three execution environments, managed by trusted
-host tooling. Separate containers are the preferred prototype; equivalent
-boundaries need the same evidence before being accepted.
+The initial candidate uses three execution environments, managed by trusted host
+tooling. Start with separate containers. Evaluate another boundary only when it passes
+the same containment and workflow tests.
 
 | Environment | Intended authority | Required separation |
 | --- | --- | --- |
@@ -109,8 +111,9 @@ and weaker guarantees separately.
 
 ## Implementation sequence and task checklist
 
-All tasks below are pending. Completion requires evidence, not only a working
-launcher or a passing report that accepts socket exposure.
+All tasks below are pending. Complete each task only after recording evidence for its
+required behavior. A working launcher or accepted socket warning alone does not satisfy
+the containment requirements.
 
 ### Phase 1: define and prove the boundary
 
@@ -129,14 +132,13 @@ launcher or a passing report that accepts socket exposure.
 - [ ] Build a disposable Node prototype that demonstrates separation on the
   observed ABI 3 host without assuming a kernel upgrade.
 
-Gate: do not integrate a strict mode until direct execution and controller
-bypasses have been tested. If these cannot be excluded, revise the architecture
-and narrow its claims before proceeding.
+Integrate strict mode only after tests exclude direct-execution and controller bypasses.
+Revise the architecture and its claims if those tests expose a gap.
 
 ### Phase 2: constrain package jobs
 
-- [ ] Give jobs private home, scratch, dependency/cache, process, and runtime
-  locations. Review Unix sockets in shared source paths as well as `/tmp`.
+- [ ] Give jobs private home, scratch, dependency/cache, process, and runtime locations.
+      Review Unix sockets in shared source paths as well as `/tmp`.
 - [ ] Exclude editor/agent homes, host process views, host credentials, forwarded
   agent/display sockets, and container-engine endpoints from worker mounts.
 - [ ] Use an explicit environment allowlist and review inherited file descriptors
@@ -146,9 +148,9 @@ and narrow its claims before proceeding.
 - [ ] Give package jobs a reviewed egress policy separate from agent API access.
   Verify role separation through trusted topology/configuration, not client-
   supplied role headers or environment labels.
-- [ ] Define private-registry access when needed. Use narrowly scoped job access
-  or a reviewed download mechanism; exclude general host/agent tokens and avoid
-  leaking fetch credentials into lifecycle scripts or logs.
+- [ ] Define private-registry access when needed. Use narrowly scoped job access or a
+      reviewed download mechanism. Keep general host/agent tokens out of jobs and
+      prevent lifecycle scripts or logs from exposing fetch credentials.
 - [ ] Bound job lifetime, CPU, memory, process count, scratch, output, and storage.
   Record host quota requirements where disk bounds cannot be enforced.
 - [ ] Define cleanup, cancellation, concurrent jobs, cache contamination, and
@@ -184,27 +186,28 @@ and narrow its claims before proceeding.
   test denied reads and protocol access without consulting real host credentials.
 - [ ] Prove that worker policy, control configuration, privileged mounts, engine
   access, and agent credential state cannot be changed or reached by a job.
-- [ ] Test direct interpreter execution and raw package-manager binaries as well
-  as supported shims; containment must not depend on a particular command name.
+- [ ] Test direct interpreter execution and raw package-manager binaries as well as
+      supported shims. Require the same containment when callers bypass the shim.
 - [ ] Verify that worker-modified scripts, dependencies, and plugins do not execute
   automatically in the editor or agent context. Include concurrent mutation
   between result review and promotion.
-- [ ] Keep deliberate writes to the job's writable project as expected behavior;
-  distinguish that residual risk from protected-file denial failures.
+- [ ] Treat writes within the job’s permitted project as expected behavior. Report
+      protected-file access as a boundary failure.
 - [ ] Keep accepted editor socket warnings separate from worker isolation results.
   A socket approval must never turn a worker boundary failure into a pass.
 
-Gate: require both positive workflow tests and negative cross-boundary tests.
-A missing socket or stopped fixture alone does not prove enforced denial; use
-live harmless services and verify their availability from the intended context.
+Require successful supported workflows and denied cross-boundary operations. Use live
+harmless services that remain reachable from their intended context. A missing endpoint
+or stopped fixture cannot establish enforced denial.
 
 ### Phase 5: integrate and document strict mode
 
 - [ ] Integrate the validated topology and protected launcher with preparation,
   setup, patching, and runtime checks. Preserve existing workspace data and mode
   until an explicit migration selects the new arrangement.
-- [ ] Make strict mode refuse unsupported enforcement or launch paths. Document
-  compatibility-mode exposure separately; do not silently relax the boundary.
+- [ ] Make strict mode refuse unsupported enforcement or launch paths. Document the
+      exposure of compatibility mode separately. Reject unsupported strict-mode paths
+      rather than silently relaxing enforcement.
 - [ ] Record the supported host/kernel/editor and language workflow matrix.
   Retain open items when a platform or variant has not been exercised.
 - [ ] Document credential provisioning, editor limitations, job lifecycle,
@@ -214,22 +217,22 @@ live harmless services and verify their availability from the intended context.
 
 ## Optional additional controls
 
-Evaluate these after the baseline boundary is demonstrated:
+Evaluate the following options after baseline boundary tests pass.
 
 | Candidate | Evaluation requirement |
 | --- | --- |
 | Separate UIDs and restrictive socket directories | Prove the package identity cannot change permissions, adopt the editor identity, or reach alternative endpoints. Same-user permission changes alone are insufficient. |
-| Per-process seccomp restrictions on Unix-socket creation | Review inherited descriptors, alternate syscall paths, and tool compatibility; avoid breaking the editor by applying a global restriction indiscriminately. |
+| Per-process seccomp restrictions on Unix-socket creation | Test inherited descriptors, alternate syscall paths, and compatibility before applying restrictions to each process. |
 | Newer Landlock pathname-socket enforcement | Require compatible kernel and userspace support, suitably narrow path rules, and live denial tests. Raising the ABI while broadly granting `/tmp` access is not sufficient. |
-| A credential broker outside package execution | Restrict operations, destinations, and authority; do not expose a generic secret-return or host-execution service. Available API authority can still be abused even if the token itself stays hidden. |
+| A credential broker outside package execution | Permit only reviewed operations and destinations. Exclude general secret-return and host-execution methods. Available API authority can still be abused. |
 
 These are candidates, not implemented protections or substitutes for proving
 the complete execution boundary.
 
 ## Acceptance criteria
 
-The first deliverable is a proven Node workflow, not a guarantee that packages
-are benign. It is complete only when:
+Complete the first Node workflow when all five criteria below pass. The boundary limits
+package authority while leaving malicious behavior within permitted resources possible.
 
 1. Install hooks, package binaries, tests/builds, and supported project tools run
    within the enforced package boundary, including descendants.
@@ -242,6 +245,5 @@ are benign. It is complete only when:
 5. Workspace corruption, malicious outputs, permitted network use, resource
    limits, trusted-component assumptions, and untested platforms remain explicit.
 
-The next implementation step is Phase 1's execution inventory and disposable
-prototype. This document records the plan; it does not start implementation or
-approve any socket exposure.
+Start implementation with Phase 1’s execution inventory and disposable prototype. Socket
+approvals remain a separate host action under the existing policy.

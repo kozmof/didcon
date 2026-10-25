@@ -1,263 +1,296 @@
-# didcon Security Improvement Report
+# didcon security improvement report
 
 ## Executive summary
 
-**Implementation checkpoint (2026-10-24):** Phase 1 control mounts, dependency
-volumes, the npx shim, Phase 2 volume seeding/exports, and Phase 3 TLS-inspecting
-egress are implemented in the working tree. The Node image builds, and disposable
-mount, volume/export, and proxy integration tests pass. Actual IDE attach/reconnect,
-authenticated agent API workflows, other language images, and narrower temporary-file grants
-remain to be validated. The recovery follow-up passed Node CLI/package smoke tests,
-safe-chain installation, nested parent/child scratch-file passing, and all 60
-production preflight checks. See the [validation record](.devcontainer/docs/hardening-validation.md)
-and [task checklist](harden-1-checklist.md). These planning files remain until the
-outstanding work is complete.
+Phases 1–3 implement protected host configuration, volume workspaces with reviewed
+exports, and external TLS-inspecting egress. Node image and disposable integration
+checks have passed. Broader IDE, authenticated agent, non-Node, storage, and scratch
+compatibility checks remain open. Use the [task checklist](harden-1-checklist.md) and
+[validation record](.devcontainer/docs/hardening-validation.md) to assess completion.
 
-**Proxy selection:** Phase 3 now uses Stripe Smokescreen at commit
-`68e7b8218e226bc47d09ce705fdb8fed82145ceb`, with a didcon Go wrapper requiring
-TLS inspection and matching CONNECT, SNI, and decrypted HTTPS authority.
-Upstream TLS verification is enabled explicitly, client-selected upstream proxies
-are denied, and any non-public DNS answer rejects the complete lookup. Existing
-proxy CA identities are retained during migration. The pinned build includes an
-HTTP/1.1 CONNECT compatibility change for safe-chain. See the operational
-[migration instructions](.devcontainer/docs/hardening.md#tls-inspecting-egress).
+The 2026-10-24 proxy checkpoint uses Smokescreen commit
+`68e7b8218e226bc47d09ce705fdb8fed82145ceb` with a didcon wrapper. It requires matching
+CONNECT, SNI, and decrypted HTTPS authority, verifies upstream TLS, rejects non-public
+DNS answers, and preserves existing CA identities during migration. The build includes
+an HTTP/1.1 CONNECT compatibility change for safe-chain. Follow the
+[migration procedure](.devcontainer/docs/hardening.md#tls-inspecting-egress) when
+updating an installation.
 
-didcon limits normal agent CLI invocations and package-manager subprocesses through island, but gaps remain in host integration, writable host files, and outbound traffic. The first priorities are disabling host credential and socket forwarding, protecting host-executed configuration and Git metadata, and offering a volume-based workspace for untrusted code.
+The remaining priorities are host credential and socket denial after IDE attachment,
+complete tool workflows, persistent storage limits, and compatible narrower
+temporary-file grants. A separate
+[package isolation plan](.devcontainer/docs/package-isolation-plan.md) proposes stronger
+separation of editor, agent, and dependency execution. Kata evaluation is deferred until
+a Linux/KVM host can validate it.
 
-- **Do now:** disable unnecessary host forwarding and extend targeted read-only protection. Protect submodule `.git` pointer files as well as their configuration and hooks. A root-level `.devcontainer.json` placeholder must itself be protected against replacement.
-- **Reduce exposure:** a bounded `/tmp` tmpfs and dependency volumes help, but do not prevent disk exhaustion elsewhere or host execution through modified source files.
-- **Next:** add a volume-based workspace with reviewed exports, then move egress enforcement to a proxy sidecar. A CONNECT hostname allowlist alone does not close shared-CDN access.
-- **Additional hardening:** consider filtered DNS and narrower temporary-file grants after designing and testing their integration. Removing `/tmp` filesystem access under Landlock ABI 6 does not deny pathname Unix-socket connections.
-- **Kata Containers:** adds a kernel boundary but does not address the residual risks above. Treat it as an opt-in for Linux + KVM hosts.
-
-This report is based on the local repository ([kozmof/didcon](https://github.com/kozmof/didcon)), upstream documentation, and the Kata Containers 4.2.0 source. The review was updated on 2026-10-24. Directory replacement and submodule Git-directory redirection were reproduced with temporary local fixtures. Running-container forwarding, revised policies, and Kata compatibility remain unverified.
+This report draws on the local [didcon repository](https://github.com/kozmof/didcon),
+upstream documentation, and Kata Containers 4.2.0 source. The original review was
+updated on 2026-10-24. The risk tables below describe the earlier bind-workspace and
+in-container firewall baseline where stated. Implementation status and measured results
+belong in the linked validation record.
 
 ## Current defense layers
 
-The current setup centers on confining agent processes from the inside. The host boundary and outbound traffic rely mainly on Docker's container isolation and iptables inside the container.
+New installations default to the proxy topology. Legacy firewall mode retains
+in-container IP filtering as an explicit setup choice.
 
-| Layer | Implementation | Protects |
+| Layer | Default implementation | Scope and limits |
 | --- | --- | --- |
-| Filesystem | island (Landlock, `abi = 6`) per-tool profiles and shims | Access to `~/.ssh`, `/var/log`, `/opt/scripts`, etc. |
-| Network | iptables + ipset inside the container; IPv4 TCP/443 to allowlisted IPs, configured DNS, loopback, and established traffic; IPv6 non-loopback egress blocked | Reduces outbound destinations; does not enforce HTTP or TLS hostnames |
-| Supply chain | Takumi Guard, safe-chain, pinned hashes | Known malicious packages, newly published packages |
-| Privileges | `--cap-drop=ALL` + NET\_ADMIN/NET\_RAW/SETUID/SETGID, `no-new-privileges`, root-owned tools | Privilege escalation, tool tampering |
-| Host control surface | `.devcontainer`, `.git/config`, `.git/hooks` mounted read-only | Protects those paths in a conventional checkout; other configuration and Git directories remain writable |
-| Resources | `--pids-limit=512`, `--memory=8g`, `--cpus=4` | Bounds processes, memory, and CPU; does not impose disk quotas |
+| Filesystem | Root-owned island shims and per-tool Landlock profiles requesting ABI 6 | Restricts supported tool invocations and descendants. Effective features depend on the kernel. Direct terminal commands and extensions can run outside those domains. |
+| Network | Smokescreen TLS inspection and a separate network guard | Enforces exact hostnames, public upstream addresses, and proxy-only egress. Approved services remain possible exfiltration destinations. |
+| Supply chain | Registry screening, safe-chain, source pins, and download hashes | Reduces known package and artifact risks. Moving base tags and default agent `latest` tags remain. |
+| Privileges | Dropped capabilities, no-new-privileges, root-owned enforcement assets | The development container retains CHOWN/SETUID/SETGID for startup. NET_ADMIN/NET_RAW belong to the network guard. |
+| Host controls | Protected editor, lifecycle, Git, and submodule control mounts with anchored ancestors | Protects reviewed paths and rejects changed layouts. Source and scripts remain writable in bind mode. |
+| Workspace | Trusted bind mode or named-volume mode with reviewed Git-object exports | Volume mode keeps development writes off the host checkout. Accepted exports can still contain malicious code. |
+| Resources | 512-process, 8 GiB memory, 4 CPU, and 1 GiB `/tmp` defaults | Persistent storage and Docker allocations need host quota verification. |
 
-Note that the VS Code server and extensions run outside the island sandbox.
+The VS Code server and extensions run outside the CLI island domains. Review socket
+exposure separately from filesystem and egress protections.
 
 ## Unintended changes or execution on the host
 
-The standard configuration does not mount the Docker socket. Host integrations can still expose credentials and IPC, and the writable workspace lets the container rewrite files that the host later reads or executes.
+The earlier bind-mode baseline allowed the following host-facing changes. Phase 1
+protects selected control files and Phase 2 offers a separate workspace. Writable
+source, scripts, and accepted exports still need review before host use.
 
-| Severity | Path | What can happen |
+| Severity | Baseline path | Potential effect and current treatment |
 | --- | --- | --- |
-| High | Submodule `.git` pointer files and `.git/modules/*/hooks` and `config` | Hooks and configuration are writable. Changing a submodule's `.git` file can redirect host Git commands to an unprotected Git directory, bypassing protection of `.git/modules` |
-| High | Creating a root-level `.devcontainer.json` | `/workspace` is writable, so the file can be created. Its `initializeCommand` runs on the host; picking the wrong configuration runs code there |
-| Medium | `.vscode/tasks.json` and `settings.json` | Automatic tasks when permitted by Workspace Trust and task approval; swapped interpreter or terminal paths |
-| Medium | `.cargo/config.toml`, `.npmrc`, `build.rs`, `package.json` scripts, Makefile | Take effect as-is when the host builds the project |
-| Medium | `node_modules/.bin`, `.venv`, `.envrc`, mise config | Executed as soon as the host uses them |
-| Medium | `.git/info/exclude`, `-diff` in `.gitattributes` | Hide changes from `git status` and `git diff`, evading review |
-| Low | Symlinks pointing to host files | A host tool writing to the link changes the real file |
-| Low | VS Code automatic port forwarding | Services inside the container become reachable on the host's localhost |
-| Low | Filling the disk, damaging the working tree | Not execution, but causes damage |
+| High | Submodule `.git` pointers and actual config/hooks | A changed pointer can redirect host Git to unprotected metadata. Preparation protects pointers and control paths together. |
+| High | Root `.devcontainer.json` | Host lifecycle commands can execute when that configuration is selected. Preparation protects an existing file or creates a protected placeholder. Configuration-selection behavior still needs IDE validation. |
+| Medium | `.vscode/tasks.json` and `settings.json` | Tasks, interpreter paths, or terminal settings can trigger project code. Preparation protects `.vscode`. Workspace Trust and task approval still matter. |
+| Medium | `.cargo/config.toml`, `.npmrc`, `build.rs`, package scripts, and Makefiles | Host builds can execute modified inputs. These remain writable project content. |
+| Medium | Dependency executables, `.venv`, `.envrc`, and tool configuration | Host tools can execute container-modified files. Configured dependency volumes remove selected installations from the host checkout. |
+| Medium | `.git/info/exclude` and `.gitattributes` diff settings | Review output can hide changes. Git info is protected. Use explicit text diffs for candidate review. |
+| Low | Symlinks to host files | A later host write through a link can affect its target. Inspect candidate trees before checkout. |
+| Low | Automatic port forwarding | Container services can become reachable on host localhost. Disable automatic forwarding and request needed ports explicitly. |
+| Low | Writable project and storage | Untrusted code can damage permitted files or exhaust unbounded allocations. |
 
-Worktrees also need protection of their `.git` pointer files and actual Git metadata. The current mounts assume a conventional `.git` directory and do not support worktree layouts as-is.
+Preparation rejects linked worktrees and unsupported Git layouts in bind mode. Volume
+mode avoids mounting those host Git directories as a writable workspace.
 
-Two proposed shortcuts do not provide protection on their own:
-
-- An empty directory named `.devcontainer.json` can be removed and replaced with a file while its parent is writable. It needs a protective mount or an equivalent boundary. Empty directories also need explicit creation by setup because Git does not track them.
-- Mounting all of `.git/modules` read-only blocks normal submodule index, object, and ref writes, while leaving writable `.git` pointers able to redirect Git elsewhere. Protect the pointers and selected control files together, and require host review before changing the protected submodule topology.
+An empty `.devcontainer.json` directory can be replaced while its parent is writable.
+Protect it with a mount and create it explicitly because Git omits empty directories.
+Mounting all of `.git/modules` read-only also blocks normal object, index, and ref
+writes. Protect selected control files and pointers while keeping ordinary Git data
+writable. Review and regenerate mounts before topology changes.
 
 ## Residual risks
 
-The repository's research report and this review identify four main residual risks that the current Landlock profiles do not close.
+The baseline review identified four risks outside the original filesystem tests.
 
-| Risk | Cause | Impact |
+| Risk | Baseline cause | Current control and remaining limit |
 | --- | --- | --- |
-| Connecting to IPC sockets | Landlock ABI 6 does not restrict connections to pathname Unix sockets; DAC permissions and socket visibility still apply | Forwarded VS Code, credential, SSH/GPG, and display sockets may remain reachable even after removing `/tmp` filesystem grants |
-| Exfiltration over DNS | Arbitrary names can be resolved recursively | Data can be smuggled out in subdomain labels |
-| IP-based egress allowlist | The allowlist holds resolved IPs, not domains | Because CDNs share IPs, other hosts on the same IPs as `vscode.blob.core.windows.net` (Azure) or `files.pythonhosted.org` (Fastly) are reachable. The rules live inside the container, so a compromised in-container root can rewrite them |
-| Writable host workspace | `/workspace` bind-mounts the host directory directly | Leads to host execution through the paths in the previous section |
+| Pathname IPC | ABI 6 lacks pathname Unix-socket connection restrictions. | Disable or isolate forwarding and test real connections. Removing `/tmp` file grants alone cannot establish socket denial. |
+| DNS exfiltration | Arbitrary recursive queries can encode data in names. | Proxy mode denies client DNS and delegates lookup to the sidecar. Legacy firewall mode retains this risk. |
+| Shared-IP egress | IP allowlists can admit other tenants on a permitted CDN address. In-container root can rewrite local rules. | Default proxy mode checks CONNECT/SNI/Host and uses external network enforcement. Approved destinations can still receive uploads. |
+| Writable host checkout | Bind mode shares project content with the host. | Volume mode provides reviewed exports. Bind-mode source and scripts remain writable. |
 
-Landlock ABI 6's IPC scoping restricts abstract Unix sockets and signals. Pathname Unix-socket connection restrictions require ABI 9's `LANDLOCK_ACCESS_FS_RESOLVE_UNIX` and support in the policy implementation. Removing `/tmp` grants can reduce file access and socket discovery, but does not deny a connection to a known pathname under the current ABI 6 policies. Disabling forwarding or isolating socket visibility is the immediate control. [Kernel documentation](https://docs.kernel.org/userspace-api/landlock.html#pathname-unix-sockets-abi-9)
+Pathname socket restrictions require Landlock ABI 9's `LANDLOCK_ACCESS_FS_RESOLVE_UNIX`, compatible userspace enforcement, and suitably narrow rules. Verify actual connections
+before claiming isolation.
+[Landlock documentation](https://docs.kernel.org/userspace-api/landlock.html).
 
 ## Host impact beyond file changes
 
-A script inside the container can affect the host without changing any files. There are two main channels. The first is the host-connected sockets placed in `/tmp`: they travel over VS Code's channel rather than the network, so they bypass iptables. The second is the kernel and resources shared with the host.
+Reachable host integrations can expose authority without changing project files. The
+kernel and resources shared with the host create additional risks. A script's location
+does not determine which integrations it can reach.
 
-The current configuration does not explicitly disable this forwarding. Actual exposure depends on the host, extension settings, credentials, and socket permissions. When an integration is present and accessible, both sandboxed agents and manually launched scripts may reach it. The script's own location makes no difference.
-
-| Severity | Path | What can happen |
+| Severity | Integration or resource | Exposure to verify |
 | --- | --- | --- |
-| High (conditional) | X11 socket (if forwarded, e.g. under WSLg) | Snooping on keystrokes to GUI apps on the same display, or injecting fake keystrokes. Sending input to a terminal on that display executes commands on the host |
-| High (conditional) | Git credential helper configured by Dev Containers | If a host helper supplies credentials, `git credential fill` can return a token in plaintext. An exposed token can be used against allowlisted services within its permissions |
-| Medium | SSH / GPG agent sockets | Keys cannot be stolen, but the host's keys can authenticate and sign while connected |
-| Medium | VS Code IPC (the `$BROWSER` mechanism) | Opens arbitrary URLs in the host's browser: phishing, or launching host apps via custom URL schemes |
-| Medium | Disk usage in `/tmp`, home, logs, workspace, and volumes | Writable storage has no quota in this configuration. Filling it can exhaust the host filesystem or Docker storage allocation |
-| Medium | Per-user kernel resources | Without userns-remap, uid 1000 in the container is uid 1000 on the host. Exhausting limits such as inotify instances may break the host's IDEs and file watchers |
-| Low | Automatic port forwarding | Ports listened on inside the container are forwarded to the host's localhost |
-| Low | Shared-kernel vulnerabilities | If exploited, they reach the host (mitigated by Kata) |
-| Low | DNS | Queries reach the host-side resolver. The main impact is exfiltration |
+| High, conditional | X11 forwarding | An authenticated trusted client may observe or interfere with the accessible X session. Socket reachability alone does not establish authentication or host command execution. |
+| High, conditional | Forwarded Git credential helper | A configured helper may return usable credentials. Test with dummy fixtures and suppress credential values. |
+| Medium | SSH/GPG agents | Loaded identities may authenticate, sign, or decrypt within agent policy. Misuse need not extract private keys. |
+| Medium | Editor/browser IPC | Available methods may open URLs or invoke editor integrations. Review actual handlers and destinations. |
+| Medium | Home, logs, workspace, volumes, and Docker storage | Unbounded writes can exhaust host or Docker allocations. A `/tmp` limit covers only that filesystem. |
+| Medium | Per-user kernel resources | Shared UID mappings can expose host user limits such as inotify capacity. Rootless Docker or user namespace remapping needs host configuration. |
+| Low | Automatic forwarding | Container listeners can become reachable through host ports. |
+| Low | Shared-kernel vulnerabilities | A kernel exploit may cross the container boundary. A VM adds another boundary but retains hypervisor and shared-filesystem risks. |
+| Low | Legacy recursive DNS | Queries can carry data to an external resolver. |
 
-On the other hand, the Docker socket is not mounted. According to the research report, the container could not reach the Docker gateway or cloud metadata, nor enter the host PID namespace.
+The recorded baseline had no visible Docker socket and denied tested gateway, metadata,
+and PID-namespace access. Those observations do not establish every host integration
+boundary. See the [socket review](.devcontainer/docs/socket-security.md).
 
-**Countermeasures**
+### Countermeasures
 
-| Countermeasure | Effect | Limits |
-| --- | --- | --- |
-| Disable forwarding of the credential helper, SSH/GPG agents and X11/Wayland using the applicable host and extension settings | Removes those host capabilities when successfully disabled | Verify after attach and reconnect; removing `/tmp` grants under ABI 6 does not deny pathname-socket connections |
-| Add a bounded `/tmp` tmpfs, for example `--tmpfs /tmp:rw,nosuid,nodev,size=1g,mode=1777` | Bounds storage used at `/tmp` | Sockets can still live there; other writable paths need quotas or separate limits. Account for tmpfs in the memory budget |
-| Set `remote.autoForwardPorts: false` on the host | Disables automatic port forwarding | Forward needed ports manually |
-| Rootless Docker or userns-remap | Changes host UID mappings and reduces some shared-user resource exposure | Requires changing the host's Docker setup; does not replace resource limits |
+| Control | Required verification |
+| --- | --- |
+| Disable unnecessary credential, SSH/GPG, and display forwarding | Test known socket connections after initial attachment and reconnect. Environment cleanup alone is insufficient. |
+| Bound `/tmp` and persistent allocations | Include tmpfs in the memory budget and verify quotas separately for home, workspace, logs, and dependency volumes. |
+| Disable automatic port forwarding | Confirm explicit forwarding still works for required services. |
+| Consider rootless Docker or user namespace remapping | Verify host UID mappings and resource behavior. Retain resource limits. |
 
-**Items to verify**
+### Items to verify
 
-- [ ] Whether X11 / Wayland sockets and `DISPLAY` exist inside the container
-- [ ] Whether a disposable host credential fixture is accessible before the fix and denied after it; do not print live tokens in preflight output
-- [ ] Whether actual socket connections are denied after attach and reconnect, rather than merely checking environment variables or directory listings
-- [ ] Whether the VS Code server and agents work normally with `--tmpfs /tmp`
+- [ ] Verify actual X11, Wayland, agent, and editor connections after recreation and
+      reconnect.
+- [ ] Detect a disposable forwarded credential fixture before disabling it and confirm
+      denial afterward. Keep live tokens out of logs.
+- [ ] Verify VS Code and supported agent/tool workflows with the bounded `/tmp` and
+      replacement scratch paths.
 
 ## Compromise via a malicious npm package
 
-Layered countermeasures reduce the ways a malicious package can affect the host, but they cannot guarantee that the package is detected. Host compromise can follow either host integration access or later execution of modified dependencies, source files, scripts, or configuration.
+Package screening cannot guarantee detection. Malicious packages can use reachable
+integrations or leave files that a more privileged host/editor context later runs.
 
-Below, "execution inside the container" means running the app or tests there. It still permits access to whatever host integrations and writable mounts the process can reach. "Later execution on the host" means the host running files the container left behind.
+| Stage | Existing treatment | Remaining requirement |
+| --- | --- | --- |
+| Download | Registry screening, safe-chain, and artifact checks | Unknown malicious packages can evade detection. |
+| Installation | npm shim and inherited Landlock restrictions | Verify host integration denial and account for writable project files. |
+| App/test execution | `npm run`, `npx`, and supported tool shims | Direct interpreter or debugger launches can run outside island. Agent children retain the outer agent domain. |
+| Later host execution | Dependency volumes and reviewed exports | Review source, scripts, configuration, symlinks, submodules, and executable caches before host use. Accepted code can still be malicious. |
+| Kernel exploitation | Container runtime controls | Kata is a deferred candidate for an additional VM boundary. |
 
-| Stage | Current state | Countermeasure | After countermeasures |
-| --- | --- | --- | --- |
-| Download | Takumi Guard and safe-chain block known malicious packages | None (keep existing measures) | Unknown, newly published malware gets through |
-| Install (postinstall) | The npm shim applies npm-workspace restrictions. Host integrations may remain reachable, and `/workspace` remains writable | Disable forwarding and verify connection denial; protect host control files or use a volume workspace | Reduces integration access; writable project files can still be modified |
-| Execution inside the container (`node`, `npx`, debugger, test runner) | A direct terminal launch can run outside island; `npx` has no shim. Agent-launched children inherit their parent's sandbox even when the executable has no shim | Add an `npx` shim and route supported app/test launches through sandboxed commands such as `npm run`. Minimize accessible credentials | Covers those launch paths; direct unsandboxed launches and exfiltration to allowed services remain possible |
-| Later execution on the host | The host may execute modified dependencies, source, scripts, or configuration from `/workspace` | Put dependencies on container volumes and use the reviewed-export workflow in Phase 2 | A root `node_modules` volume hides that installation from the host checkout, but leaves source, scripts, nested dependencies, and other caches exposed in bind mode. Reviewed exports reduce persistence paths without making accepted code safe |
-| Kernel escape | Kernel shared with the host | Kata Containers (opt-in) | Mitigated |
-
-With these measures in place, residual risks still include approved-service exfiltration, accessible agent credentials, modified code accepted during review, unsandboxed execution, and kernel vulnerabilities. A dependency volume alone does not close host compromise through a writable project.
+Accessible agent credentials, approved-service exfiltration, workspace damage,
+unsandboxed execution, and kernel vulnerabilities remain relevant after these controls.
+Dependency volumes alone cannot contain all host-facing behavior.
 
 ## Improvement roadmap
 
-Start by reducing host integrations and protecting known control files. Prioritize the volume workflow for untrusted repositories, then move network enforcement outside the development container. Each phase has separate acceptance checks; completing egress work does not close writable-workspace or socket exposure.
+Phases 1–3 have implementation and fixture evidence. Complete the remaining host and
+workflow checks before marking them finished. The following sections retain each phase's
+intended behavior and acceptance requirements.
 
 ### Phase 1: host integration and targeted protection
 
-| Countermeasure | Effect | Trade-off or acceptance requirement |
-| --- | --- | --- |
-| Disable unnecessary forwarding using host settings, including `dev.containers.dockerCredentialHelper: false`, `dev.containers.gitCredentialHelperConfigLocation: "none"`, and `dev.containers.copyGitConfig: false`; disable SSH/GPG and display forwarding separately, and set `remote.autoForwardPorts: false` | Reduces host credentials, sockets, and automatic port exposure | Document version-specific settings and verify after attach/reconnect; clearing environment variables alone is insufficient |
-| Add read-only mounts for `.vscode` and `.git/info` where appropriate | Protects existing editor configuration and Git-local review settings | Setup must handle missing paths and validate path types; `.gitattributes` and other project scripts remain writable |
-| Protect each existing submodule's `.git` pointer file plus its actual config, hooks, and relevant info files | Prevents modification or redirection of those host Git control paths | Leave index, objects, and refs writable. New or relocated submodules need host review and updated mounts before host Git operations |
-| Create and read-only bind a root `.devcontainer.json` placeholder, or protect an existing legitimate configuration | Prevents replacement with host-executed lifecycle configuration | Test configuration discovery. A removable empty directory is insufficient; setup must create any required placeholder |
-| Add bounded `/tmp` tmpfs and separate storage limits where needed | Limits `/tmp` storage and selected other allocations | Test tools and memory use; home, logs, workspace, and dependency volumes are not covered by the `/tmp` limit |
-| Mount a project-specific named volume on `node_modules`; account for monorepo installation paths and other executable caches | Keeps those dependency installations outside the host checkout | Initialize ownership for `dev`, test package managers, and require separate host installs. Source and scripts remain writable |
-| Add an `npx` shim and use sandboxed launch paths for apps and tests | Covers additional normal execution paths | Direct terminal launches of `node` or a debugger may still run outside island |
-| Extend `security-preflight.sh` with mount, connection, and harmless credential-fixture checks | Detects configuration regressions | Run after integrations are established and after reconnect; use behavioral checks and keep credential values out of output |
+Protect editor/lifecycle files, Git config/hooks/info, submodule pointers, and
+`.gitmodules`. Anchor ancestor directories to prevent replacement by rename. Keep
+index, objects, and refs writable. Reject unsupported layouts and require host review
+before accepting new submodules.
 
-The host-side setup must discover actual Git directories and pointer files before generating mounts. Protecting `.git/modules` wholesale is unsuitable for normal submodule development. These measures protect known control surfaces; they do not make a writable host checkout safe for arbitrary hostile code.
+Disable unnecessary host forwarding through the applicable host settings. Use
+project-specific dependency volumes and bounded scratch. Route normal npm/npx and
+supported app/test launches through shims. Run mount, connection, and dummy credential
+checks after integrations are established.
+
+Acceptance requires both denied protected operations and working Git/tool workflows.
+Verify missing-path creation, root placeholder selection, ownership, storage limits, and
+behavior after IDE reconnect. Follow the
+[operational guide](.devcontainer/docs/hardening.md) for settings and commands.
 
 ### Phase 2: volume workspace and reviewed exports
 
-Clone the project into a container volume. Keep host-owned launch configuration outside the container's writable project, and transfer proposed changes through a reviewed Git fetch or patch export into a separate host-controlled checkout.
+Seed a named volume from committed host HEAD. Keep host launch configuration outside the
+writable project and export committed Git objects without exposing engine access or host
+credentials to the development container.
 
-- Fetching Git objects does not import the source repository's local hooks or config. Define a transfer path that does not expose the Docker socket, mount the volume read-write on the host, or grant the development container host credentials.
-- Review the candidate commit before checkout or merge, with trusted host Git configuration and hooks. Use `git diff --text --no-textconv --no-ext-diff <trusted-base> <candidate>` and inspect the candidate tree for symlinks, submodules, editor settings, lifecycle configuration, and build scripts.
-- After checkout, `git status --ignored` can reveal local ignored artifacts, but does not replace review of the fetched commit. Code accepted during review can still execute malicious behavior later.
-- Expose trusted bind mode and untrusted volume mode as explicit setup choices. VS Code can still edit through its remote container connection; ordinary host filesystem tools no longer edit the same checkout directly.
+Fetch into a separate host-controlled review repository with trusted Git config and
+hooks. Review with
+`git diff --text --no-textconv --no-ext-diff <trusted-base> <candidate>` and inspect the
+tree before checkout or merge. Include symlinks, submodules, editor settings, lifecycle
+commands, and build scripts. Export submodule objects separately. `git status --ignored`
+can help inspect local artifacts after checkout but cannot replace candidate review.
 
-Acceptance requires that the host checkout and its Git control files remain unchanged during container execution, and that only explicitly selected changes cross the export boundary.
+Acceptance requires unchanged host workspace/control files during development and
+explicit selection of reviewed changes for promotion. Verify volume editing,
+persistence, rebuild, export, and recovery workflows.
 
 ### Phase 3: egress proxy sidecar
 
-Use Docker Compose to run a proxy and connect the devcontainer only to a dedicated internal network. Enforce the egress boundary outside the development container, allowing only the intended proxy path and required internal services. Configure proxy support for each tool and transport, including its Landlock permission to connect to the chosen proxy port.
+Use an internal development network with external enforcement and only the intended
+proxy route. Test direct IP, IPv6, Docker DNS, host-service, and alternate proxy bypass
+attempts. Removing proxy environment values must not create a fallback path. Drop
+NET_ADMIN/NET_RAW from the development container.
 
-- A CONNECT ACL checks the requested tunnel destination. It does not necessarily check the TLS SNI or encrypted HTTP authority sent through the tunnel. A client can request an allowed CDN hostname and then attempt to reach another tenant on that IP. Smokescreen's implementation distinguishes ordinary tunnels from MITM rules. [Implementation](https://github.com/stripe/smokescreen/blob/master/pkg/smokescreen/smokescreen.go)
-- Define how the proxy validates destination addresses, CONNECT/SNI consistency, and HTTP authority. SNI inspection alone can leave domain fronting possible where a service accepts a different encrypted HTTP Host. Use TLS interception with authority checks where required, or explicitly retain and test that residual risk.
-- Rules outside the container cannot be rewritten merely by obtaining root inside it. Verify that direct IP traffic, IPv6, Docker DNS, host services, and alternate proxy destinations cannot bypass the policy.
-- Drop NET\_ADMIN/NET\_RAW after removing the in-container firewall dependency. Restrict DNS separately: proxy-only tools can delegate destination resolution, but internal service discovery may still be required. An internal network by itself is not proof that external DNS forwarding is blocked.
-- Test every supported agent, package manager, Git transport, debugger, and extension workflow. Proxy environment variables alone do not enforce routing.
+A CONNECT allowlist alone does not check encrypted SNI or HTTP authority. Require TLS
+inspection with matching CONNECT/SNI/Host, verified upstream certificates, public
+destination-address validation, and pinned upstream connections. The
+[Smokescreen implementation](https://github.com/stripe/smokescreen/blob/master/pkg/smokescreen/smokescreen.go)
+distinguishes tunnels from inspection rules.
 
-Cost: a Compose setup, tool compatibility testing, and a decision about TLS inspection and certificate trust. Approved remote services remain possible exfiltration destinations.
+Verify CA isolation, failure denial, DNS rebinding behavior, and compatibility with each
+agent, package manager, Git transport, debugger, and extension. Proxy environment
+settings alone cannot prove routing enforcement. TLS trust and certificate-pinned
+clients require explicit compatibility checks.
 
 ### Phase 4: filtered DNS and narrower temporary-file access
 
-These are additional controls. A DNS filter can be implemented earlier as an interim measure if the proxy migration is deferred.
+Proxy mode denies client DNS and resolves destinations in the sidecar. A client filtered
+resolver remains deferred for legacy firewall mode.
 
-**DNS allowlist**
+#### DNS allowlist
 
-Run a resolver such as dnsmasq with a dedicated runtime UID and return NXDOMAIN for names outside an explicit allowlist. Start with the privileges it needs, then drop privileges; match the actual runtime UID in firewall rules.
+For a future legacy resolver, define permitted names, record types, subdomains, refresh,
+and failure behavior. Use a dedicated runtime UID and match that actual identity in
+firewall rules. Permit client queries only to the filtered listener and upstream DNS
+only from the resolver.
 
-- `--ipset=/github.com/allowed-net` adds resolved addresses to an existing set; it does not itself filter DNS. Configure default-deny forwarding, permitted names, record types, and subdomain matching explicitly. Define address expiry and refresh behavior before removing the current refresh loop. [dnsmasq manual](https://thekelleys.org.uk/dnsmasq/docs/dnsmasq-man.html)
-- Allow clients to query only the filtered listener, and permit upstream DNS only from the resolver UID. Close direct access to Docker's embedded resolver at `127.0.0.11`, including its NAT-translated listener ports, before broad loopback accepts. The current firewall preserves Docker DNS NAT rules and accepts loopback traffic, so adding only a port-53 owner rule is insufficient. Docker documents the embedded resolver's external forwarding behavior. [Docker DNS documentation](https://docs.docker.com/engine/network/#dns-services)
-- Verify UDP and TCP queries, alternate resolver addresses, non-A record queries, subdomain policy, and failure behavior. Private and metadata addresses returned for permitted names must not become allowed egress destinations.
-- This reduces arbitrary recursive-DNS exfiltration when alternate paths are blocked. Shared-IP access, approved-service exfiltration, and a compromised in-container root remain risks if enforcement is inside the container.
+`dnsmasq --ipset` adds answers to an existing set without implementing a complete name
+policy. Define default-deny forwarding and address expiry separately. Block Docker's
+embedded resolver at `127.0.0.11` and its translated ports before broad loopback
+accepts. Test UDP/TCP, alternate resolvers, non-A records, private answers, and restart
+behavior. See the
+[dnsmasq manual](https://thekelleys.org.uk/dnsmasq/docs/dnsmasq-man.html) and
+[Docker DNS documentation](https://docs.docker.com/engine/network/#dns-services).
 
-**Temporary-file access**
+#### Temporary-file access
 
-Do not remove `/tmp` grants as a socket-isolation fix under ABI 6. Scratch paths must be accessible to each participating parent and nested tool policy. The implementation now standardizes tool and herdr `TMPDIR` on `/tmp/didcon`, with Claude and Codex subdirectories beneath it. Startup creates these directories with dev ownership and mode 0700 inside the bounded tmpfs. This fixes the reproduced nested-npm failure caused by inheriting an agent-home temp directory outside the inner tool's grants.
+Startup creates dev-owned mode-0700 scratch directories under `/tmp/didcon`. Tools and
+herdr share the root. Claude and Codex use subdirectories. This fixes the recorded
+nested-npm denial caused by an inherited agent-home temporary path.
 
-Node agent-profile and package workflows have passed with the replacement hierarchy; complete the other language and real multiplexer checks before narrowing the existing `/tmp` grants. A future ABI 9 socket policy also requires kernel and island support and explicit connection-denial tests; changing temporary-file grants alone does not provide it.
+Keep the existing `/tmp` grants until all direct and nested tool combinations pass.
+Complete non-Node and actual herdr checks before narrowing them. ABI 6 filesystem rules
+do not establish pathname socket denial. Any future ABI 9 policy requires compatible
+enforcement and live connection tests.
 
 ## Kata Containers evaluation
 
-The Kata Go runtime with QEMU is a candidate for adding a VM kernel boundary. After installing and registering it on the host, `--runtime=kata` selects it. Compatibility with this devcontainer's mounts, privileges, firewall, and island policies must be tested before offering it as a supported setup option. It does not close writable-workspace or host-integration paths.
+Kata remains unimplemented in didcon. Evaluate its Go runtime with QEMU on a Linux/KVM
+host before offering a setup option. The Kata 4.2.0
+[Docker guide](https://github.com/kata-containers/kata-containers/blob/4.2.0/docs/how-to/how-to-use-kata-with-docker.md)
+uses the deprecated Go runtime, requires Kata 3.29+ for Docker 26+, and limits its
+tested VMM to QEMU. Do not infer support for other combinations.
 
-**Compatibility**
-
-| Item | Status |
+| Evaluation area | Acceptance requirement |
 | --- | --- |
-| Landlock (island) | Check that the selected guest kernel enables Landlock, query its ABI, and test the required filesystem, network, and IPC denials. A policy's `abi = 6` declaration is not proof of full enforcement on an older or differently configured kernel |
-| Firewall | Source configuration indicates support for the required Netfilter features; actual ipset, IPv4, and IPv6 behavior remains an acceptance test for the selected guest image |
-| Docker integration | Only via the deprecated Go runtime, tested only with QEMU. Docker v26+ requires Kata 3.29+. Podman is not supported |
-| Host requirements | Requires `/dev/kvm`. Effectively unusable with Docker Desktop on macOS and with Codespaces |
+| Host/runtime | Verify KVM availability, selected runtime, and host support. Docker Desktop and hosted environments require separate feasibility checks. |
+| Landlock | Query the guest ABI and test filesystem, network, and IPC denials. |
+| Firewall | Test required Netfilter, ipset, IPv4, and IPv6 behavior in the selected guest if retaining legacy mode. |
+| Seccomp/AppArmor | Review `disable_guest_seccomp` and effective guest filtering. Do not assume host AppArmor protection applies inside the guest. |
+| Mounts | Test protected files/directories, submodule pointers, dependency volumes, tmpfs, and `--init`. |
+| Performance/resources | Compare npm/pnpm installs and Cargo builds with runc. Measure shared-filesystem costs and CPU/memory accounting. |
 
-**Benefits**
+Kata 4.2.0's
+[QEMU configuration](https://github.com/kata-containers/kata-containers/blob/4.2.0/src/runtime/config/configuration-qemu.toml.in)
+defaults `disable_guest_seccomp` to `true`. Enable and verify guest filtering for the
+evaluated deployment. Workspace caches also cross the shared filesystem, so benchmark
+the selected storage path before choosing it.
 
-- A guest-kernel exploit must cross an additional VM boundary to reach the host; hypervisor and shared-filesystem vulnerabilities remain relevant.
-- The impact of capabilities such as NET\_ADMIN is confined to the VM.
-- Landlock availability no longer depends on the host kernel.
-
-**Costs and caveats**
-
-- Kata defaults to `disable_guest_seccomp = true`, so Docker's default seccomp profile is not enforced in the guest. Set it to false in `configuration.toml`. AppArmor's docker-default profile does not apply either.
-- The design places CARGO\_HOME, the pnpm store and the uv/zig caches under `/workspace`, so all of them go through virtio-fs, which tends to slow down installs and builds.
-- VM overhead and configured base resources must be measured alongside `--memory` / `--cpus`; verify the selected runtime's resource accounting rather than assuming a fixed additive cost.
-
-**Recommendation**
-
-After integration testing, add "Run with Kata (requires KVM)" as an explicit setup.sh option. Verify the selected runtime through host-side Docker inspection, and have preflight check guest capabilities and effective policy denials. Document the tested versions and Kata settings; an in-container environment flag alone does not prove which runtime started it.
+A VM adds a guest kernel boundary. It leaves forwarded IPC, writable checkouts, accepted
+malicious code, hypervisor vulnerabilities, and shared-filesystem risks to address
+separately. Expose a Kata option only after compatibility tests pass, and verify the
+effective runtime through host Docker inspection.
 
 ## Remaining risks and verification items
 
-Even after these changes, domain and IP allowlists do not prevent exfiltration through an approved destination such as github.com using an attacker's own token. Minimize accessible credentials, scope any required credentials, and minimize VS Code extensions. Reviewed exports can still carry malicious source or configuration, and quotas are needed for every writable storage allocation whose exhaustion would harm the host.
+Approved services such as GitHub can receive data using attacker-controlled credentials.
+Minimize available credentials and extension authority. Review accepted source and
+configuration, and verify storage bounds for every allocation whose exhaustion could
+harm the host.
 
-**Locally reproduced during review**
-
-- [x] An unmounted empty `.devcontainer.json` directory can be removed and replaced with a regular file.
-- [x] In a temporary submodule fixture, changing the submodule's `.git` pointer redirected `git submodule update --force` to a harmless hook outside `.git/modules`. This tested Git's redirection behavior, not a complete read-only mount configuration.
-
-**Items to verify in running containers and on supported hosts**
-
-- [ ] Which configuration Dev Containers picks when a root-level `.devcontainer.json` exists (whether it prompts or chooses automatically)
-- [ ] Whether protected placeholders and Git pointer files resist writes, removal, renaming, and redirection while normal commits and supported submodule operations work
-- [ ] Whether host credential and socket access stays denied after initial attach and reconnect
-- [ ] Whether claude / codex / herdr, safe-chain, and each shim work through direct and nested launches with replacement scratch paths
-- [ ] Whether pathname-socket connections are actually denied by any proposed socket isolation; ABI 6 filesystem-grant removal alone does not meet this requirement
-- [ ] Whether dnsmasq's `--ipset` works with the ipset in the Chainguard image
-- [ ] Whether direct Docker DNS, alternate resolvers, and non-A queries bypass the filtered resolver
-- [ ] Whether direct IP traffic, IPv6, CONNECT/SNI mismatches, and domain fronting bypass the proxy policy
-- [ ] Whether volume-mode exports leave host files and Git metadata untouched until reviewed changes are accepted
-- [ ] Whether `/tmp`, home, workspace, logs, and volumes each have the intended storage and memory limits
-- [ ] Whether the read-only bind of the single file `.git/config` and `--init` (the docker-init bind) work on Kata
-- [ ] Whether `.devcontainer` and `.git/hooks` remain read-only on Kata
-- [ ] Install times for npm / pnpm and build times for cargo on Kata compared with runc
+Track the remaining IDE, tool, quota, DNS, socket, volume, and optional Kata checks in
+the [task checklist](harden-1-checklist.md). Record acceptance evidence in the
+[validation record](.devcontainer/docs/hardening-validation.md).
 
 ## Sources
 
-- [kozmof/didcon](https://github.com/kozmof/didcon) (local `.devcontainer/devcontainer.json`, `scripts/setup-firewall.sh`, island profiles, and `docs/island-security-research-report.md`)
-- [Linux Landlock documentation](https://docs.kernel.org/userspace-api/landlock.html#pathname-unix-sockets-abi-9) (pathname Unix sockets and ABI requirements)
-- [VS Code Git credential sharing](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials) (credential helpers and agent forwarding)
-- [Git repository layout](https://git-scm.com/docs/gitrepository-layout) (Git-directory pointer files and repository metadata)
-- [Docker DNS services](https://docs.docker.com/engine/network/#dns-services) (embedded resolver forwarding)
-- [Docker tmpfs mounts](https://docs.docker.com/engine/storage/tmpfs/) (storage and memory accounting)
-- [dnsmasq manual](https://thekelleys.org.uk/dnsmasq/docs/dnsmasq-man.html) (forwarding, domain matching, runtime UID, and ipset integration)
-- [Smokescreen proxy implementation](https://github.com/stripe/smokescreen/blob/master/pkg/smokescreen/smokescreen.go) (`handleConnect` distinguishes tunnels from MITM rules)
-- [Kata 4.2.0 Docker guide](https://github.com/kata-containers/kata-containers/blob/4.2.0/docs/how-to/how-to-use-kata-with-docker.md) and [source](https://github.com/kata-containers/kata-containers/tree/4.2.0) (`versions.yaml`, kernel fragments, `docs/Limitations.md`, and `src/runtime/config/configuration-qemu.toml.in`)
+- [didcon source](https://github.com/kozmof/didcon) and the local host preparation,
+  Compose generator, scripts, and island profiles.
+- [Linux Landlock documentation](https://docs.kernel.org/userspace-api/landlock.html)
+  for inherited restrictions and ABI features.
+- [VS Code Git credential sharing](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials)
+  for helpers and forwarding.
+- [Git repository layout](https://git-scm.com/docs/gitrepository-layout) for pointer
+  files and metadata.
+- [Docker DNS services](https://docs.docker.com/engine/network/#dns-services) and
+  [tmpfs mounts](https://docs.docker.com/engine/storage/tmpfs/) for resolver and storage
+  behavior.
+- [dnsmasq manual](https://thekelleys.org.uk/dnsmasq/docs/dnsmasq-man.html) for
+  forwarding, UID, and ipset configuration.
+- [Smokescreen source](https://github.com/stripe/smokescreen/blob/master/pkg/smokescreen/smokescreen.go)
+  for CONNECT handling.
+- [Kata 4.2.0 source](https://github.com/kata-containers/kata-containers/tree/4.2.0) and
+  its linked Docker and QEMU configuration documents for the deferred runtime
+  evaluation.
