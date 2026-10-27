@@ -3,10 +3,11 @@
 #
 #   Clone this repository, then run this script to place .devcontainer
 #   at the root of your project. It asks which Dockerfile variant to build
-#   and what name the container should carry, then writes both into the
-#   copied devcontainer.json so nothing has to be edited by hand.
+#   and what display name and Compose project name to use, then prepares
+#   the copied configuration so nothing has to be edited by hand.
 #
 #   TARGET_DIR  Directory to install .devcontainer into (default: current directory)
+#   DIDCON_COMPOSE_PROJECT_NAME  Optional Docker Compose group name (default: repository directory name)
 #
 # Example:
 #   git clone <this-repo> /tmp/didcon
@@ -70,8 +71,24 @@ VARIANT_PATH=""
 VARIANT_CONTEXT=""
 WORKSPACE_MODE="${DIDCON_WORKSPACE_MODE:-bind}"
 EGRESS_MODE="${DIDCON_EGRESS_MODE:-proxy}"
+PROJECT_NAME="${DIDCON_COMPOSE_PROJECT_NAME:-}"
 case "$WORKSPACE_MODE" in bind|volume) ;; *) echo "Error: DIDCON_WORKSPACE_MODE must be bind or volume." >&2; exit 1 ;; esac
 case "$EGRESS_MODE" in firewall|proxy) ;; *) echo "Error: DIDCON_EGRESS_MODE must be firewall or proxy." >&2; exit 1 ;; esac
+
+valid_project_name() {
+  [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]]
+}
+
+if [ -n "$PROJECT_NAME" ]; then
+  if ! valid_project_name "$PROJECT_NAME"; then
+    echo "Error: DIDCON_COMPOSE_PROJECT_NAME must use lowercase letters, digits, hyphens, or underscores and start with a letter or digit." >&2
+    exit 1
+  fi
+  if [ "$EGRESS_MODE" != proxy ]; then
+    echo "Error: DIDCON_COMPOSE_PROJECT_NAME requires DIDCON_EGRESS_MODE=proxy." >&2
+    exit 1
+  fi
+fi
 
 set_variant() {
   # $1 = menu number. Sets VARIANT_PATH/VARIANT_CONTEXT, or returns 1.
@@ -140,6 +157,31 @@ if [ -n "$TTY" ]; then
   done
 fi
 
+if [ "$EGRESS_MODE" = proxy ] && [ -z "$PROJECT_NAME" ]; then
+  PROJECT_NAME="$(python3 -c '
+from pathlib import Path
+import re
+import sys
+
+name = re.sub(r"[^a-z0-9_-]", "-", Path(sys.argv[1]).resolve().name.lower())
+print(name.lstrip("-_") or "didcon")
+' "$TARGET_DIR")"
+fi
+
+if [ -n "$TTY" ] && [ "$EGRESS_MODE" = proxy ]; then
+  echo "The Compose project name controls the parent group shown in Docker."
+  while true; do
+    printf 'Compose project name [%s]: ' "$PROJECT_NAME"
+    IFS= read -r reply <"$TTY" || reply=""
+    [ -n "$reply" ] || reply="$PROJECT_NAME"
+    if valid_project_name "$reply"; then
+      PROJECT_NAME="$reply"
+      break
+    fi
+    echo "  Use lowercase letters, digits, hyphens, or underscores, starting with a letter or digit."
+  done
+fi
+
 if [ -n "$TTY" ]; then
   echo "Workspace: bind shares the trusted host checkout; volume exports reviewed Git objects."
   while true; do
@@ -196,7 +238,11 @@ fi
 
 cat "$TMP_JSON" >"$JSON"
 
-python3 "$TARGET_DIR/.devcontainer/host/prepare.py" --mode "$WORKSPACE_MODE" --egress "$EGRESS_MODE" "$TARGET_DIR"
+PREPARE_ARGS=(--mode "$WORKSPACE_MODE" --egress "$EGRESS_MODE")
+if [ -n "$PROJECT_NAME" ]; then
+  PREPARE_ARGS+=(--compose-project-name "$PROJECT_NAME")
+fi
+python3 "$TARGET_DIR/.devcontainer/host/prepare.py" "${PREPARE_ARGS[@]}" "$TARGET_DIR"
 
 echo "Placed .devcontainer at $TARGET_DIR/.devcontainer"
 echo "  name:       $NAME"

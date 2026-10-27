@@ -241,7 +241,7 @@ def seed_bundle(root):
     return {"commit": commit.stdout.strip(), "sha256": digest(destination)}
 
 
-def configure(root, dependencies, mode=None, egress=None):
+def configure(root, dependencies, mode=None, egress=None, compose_project_name=None):
     manifest_path = root / MANIFEST
     checked_path(root, ".devcontainer/devcontainer.json", "file")
     config = read_jsonc(root / ".devcontainer/devcontainer.json")
@@ -253,6 +253,12 @@ def configure(root, dependencies, mode=None, egress=None):
     template = copy.deepcopy(previous.get("template", config))
     identity = hashlib.sha256(str(root).encode()).hexdigest()[:16]
     selected_egress = egress or previous.get("egress", "firewall")
+    project_name = compose_project_name if compose_project_name is not None else previous.get("compose_project_name")
+    if project_name is not None:
+        if not isinstance(project_name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", project_name):
+            raise PreparationError("Compose project name must use lowercase letters, digits, hyphens, or underscores and start with a letter or digit")
+        if selected_egress != "proxy":
+            raise PreparationError("Compose project name requires proxy egress mode")
     selected = mode or previous.get("mode", "bind")
     if selected == "bind":
         state = inventory(root, create=True)
@@ -269,6 +275,8 @@ def configure(root, dependencies, mode=None, egress=None):
     state["dependencies"] = sorted(set(paths))
     state["egress"] = selected_egress
     state["identity"] = identity
+    if project_name is not None:
+        state["compose_project_name"] = project_name
     state["template"] = template
     targets = set("/workspace/" + path for path in state["protected"])
     targets.update("/workspace/" + path for path in previous.get("protected", {}))
@@ -330,6 +338,8 @@ def configure(root, dependencies, mode=None, egress=None):
     atomic_json(manifest_path, state)
     atomic_json(root / ".devcontainer/devcontainer.json", config)
     print(f"[didcon] Protected {len(state['protected'])} paths; {len(state['pointers'])} submodules; {len(state['dependencies'])} dependency volumes")
+    if selected_egress == "proxy":
+        print(f"[didcon] Compose project: {compose['name']}")
 
 
 def verify(root):
@@ -346,7 +356,7 @@ def verify(root):
     actual["egress"] = expected.get("egress", "firewall")
     actual["identity"] = hashlib.sha256(str(root).encode()).hexdigest()[:16]
     actual["template"] = expected["template"]
-    for key in ("build", "environment", "custom_mounts", "compose_sha256"):
+    for key in ("build", "environment", "custom_mounts", "compose_sha256", "compose_project_name"):
         if key in expected:
             actual[key] = expected[key]
     validate_dependencies(root, actual["dependencies"])
@@ -375,6 +385,7 @@ def main():
                         help="Relative dependency volume path; repeat for monorepos (default: node_modules)")
     parser.add_argument("--mode", choices=("bind", "volume"), help="Trusted bind workspace or isolated volume workspace")
     parser.add_argument("--egress", choices=("firewall", "proxy"), help="Legacy in-container IP firewall or external TLS-inspecting proxy")
+    parser.add_argument("--compose-project-name", help="Docker Compose group name for proxy mode (default: preserve the saved name or use didcon-<hash>)")
     parser.add_argument("project", type=Path)
     args = parser.parse_args()
     root = args.project.resolve()
@@ -390,7 +401,7 @@ def main():
         elif args.check:
             verify(root)
         else:
-            configure(root, args.dependencies, args.mode, args.egress)
+            configure(root, args.dependencies, args.mode, args.egress, args.compose_project_name)
     except (PreparationError, OSError, ValueError) as error:
         print(f"[didcon] {error}", file=sys.stderr)
         return 1

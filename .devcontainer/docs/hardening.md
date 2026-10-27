@@ -7,7 +7,9 @@ and remote Docker daemons have not been validated.
 
 ## Workspace choices
 
-`setup.sh` asks for a language variant, a container name, and a workspace mode.
+`setup.sh` asks for a language variant, a display name, a Compose project name, and a
+workspace mode. See the [setup instructions](../../README.md#fresh-install-setupsh) to
+name the parent group shown in Docker or set `DIDCON_COMPOSE_PROJECT_NAME` for scripts.
 New installations use the TLS-inspecting Smokescreen egress proxy by default.
 Set the workspace mode before running setup to change its default selection.
 

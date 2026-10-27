@@ -178,8 +178,10 @@ class PreparationTests(unittest.TestCase):
         self.assertTrue((self.root / '.devcontainer/seed.bundle').is_file())
         legacy_workspace = config['workspaceMount'].split(',', 1)[0].split('=', 1)[1]
         with contextlib.redirect_stdout(io.StringIO()):
-            prepare.configure(self.root, None, 'volume', 'proxy')
+            prepare.configure(self.root, None, 'volume', 'proxy', compose_project_name='reviewed-volume')
         compose = json.loads((self.root / '.devcontainer/compose.generated.json').read_text())
+        self.assertEqual(compose['name'], 'reviewed-volume')
+        self.verify()
         workspace = next(mount for mount in compose['services']['devcontainer']['volumes'] if mount['target'] == '/workspace')
         self.assertEqual(workspace['source'], legacy_workspace, 'Egress migration must preserve the workspace volume')
         (self.root / '.devcontainer/seed.bundle').write_bytes(b'changed')
@@ -215,6 +217,38 @@ class PreparationTests(unittest.TestCase):
         compose_path.write_text('{}')
         with self.assertRaisesRegex(prepare.PreparationError, 'topology changed'):
             self.verify()
+
+    def test_compose_project_name_survives_regeneration_and_keeps_resource_identity(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            prepare.configure(self.root, None, 'bind', 'proxy')
+        compose_path = self.root / '.devcontainer/compose.generated.json'
+        original = json.loads(compose_path.read_text())
+        # Compose permits names that cannot be used directly as image names.
+        with contextlib.redirect_stdout(io.StringIO()):
+            prepare.configure(self.root, None, compose_project_name='7review___-')
+        named = compose_path.read_bytes()
+        compose = json.loads(named)
+        self.assertEqual(compose['name'], '7review___-')
+        self.assertEqual(compose['services'], original['services'])
+        self.assertEqual(compose['volumes'], original['volumes'])
+        self.assertEqual(compose['networks'], original['networks'])
+        self.assertEqual(self.config()['name'], 'didcon')
+        self.verify()
+        with contextlib.redirect_stdout(io.StringIO()):
+            prepare.configure(self.root, None)
+        self.assertEqual(compose_path.read_bytes(), named)
+        self.verify()
+
+    def test_invalid_compose_project_names_are_rejected(self):
+        for name in ('', 'Uppercase', '-project', '_project', 'has space', 'has.dot', 'name\n'):
+            with self.subTest(name=name), self.assertRaisesRegex(prepare.PreparationError, 'Compose project name'):
+                prepare.configure(self.root, None, 'bind', 'proxy', compose_project_name=name)
+        self.assertFalse((self.root / prepare.MANIFEST).exists())
+        self.assertFalse((self.root / '.devcontainer/compose.generated.json').exists())
+
+    def test_compose_project_name_requires_proxy_mode(self):
+        with self.assertRaisesRegex(prepare.PreparationError, 'requires proxy'):
+            prepare.configure(self.root, None, 'bind', 'firewall', compose_project_name='project')
 
     def test_explicit_container_display_is_preserved(self):
         config = self.config()

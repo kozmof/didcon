@@ -17,10 +17,10 @@ git clone https://github.com/kozmof/didcon.git /tmp/didcon
 /tmp/didcon/setup.sh /path/to/your/project
 ```
 
-`setup.sh` asks for a language variant, container name, and workspace mode. The container
-name defaults to the project directory's name, with unsupported characters replaced by
-hyphens. Omit the target path to use the current directory. Setup refuses an existing
-`.devcontainer` directory. Use
+`setup.sh` asks for a language variant, display name, Compose project name, and workspace
+mode. The display name in VS Code defaults to the project directory's name, with
+unsupported characters replaced by hyphens. Omit the target path to use the current
+directory. Setup refuses an existing `.devcontainer` directory. Use
 [`patch.sh`](#update-an-existing-one-patchsh) to update one.
 
 | Workspace mode | Use | Storage |
@@ -38,6 +38,22 @@ Set `DIDCON_WORKSPACE_MODE` to choose a mode before running setup.
 ```sh
 DIDCON_WORKSPACE_MODE=volume /tmp/didcon/setup.sh /path/to/your/project
 ```
+
+Choose the parent group name shown in Docker at the Compose project name prompt.
+Leave it blank to use the repository directory's name. Setup lowercases it, replaces
+unsupported characters with hyphens, and removes leading hyphens and underscores.
+For example, `My Repo.Name` becomes `my-repo-name`. If nothing remains, setup uses
+`didcon`. Set `DIDCON_COMPOSE_PROJECT_NAME` to supply the name for scripted installs
+or change the prompt's default.
+
+```sh
+DIDCON_COMPOSE_PROJECT_NAME=my-project /tmp/didcon/setup.sh /path/to/your/project
+```
+
+Use lowercase letters, digits, hyphens, or underscores, starting with a letter or digit.
+These are [Docker's project name rules](https://docs.docker.com/compose/how-tos/project-name/).
+Choose a distinct name for each project on the same Docker host. The choice is saved
+for later preparation and rebuilds. This option applies to proxy mode.
 
 Setup generates protected mounts, a project manifest, and Compose configuration. New
 installations route external traffic through the Smokescreen proxy with TLS inspection.

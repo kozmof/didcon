@@ -8,11 +8,12 @@ PROXY_IMAGE = "didcon-smokescreen:68e7b8218e22"
 
 def generate(root, state, mounts, build, environment):
     identity = hashlib.sha256(str(root).encode()).hexdigest()[:16]
-    project = "didcon-" + identity
+    project = state.get("compose_project_name", "didcon-" + identity)
     octet = int(identity[:2], 16)
     subnet = f"172.30.{octet}.0/28"
     proxy_ip = f"172.30.{octet}.2"
-    image = project + ":dev"
+    # Keep the image reference valid for all Compose names and stable on rename.
+    image = "didcon-" + identity + ":dev"
     volumes = {"proxy-keys": {}, "proxy-trust": {}}
 
     def mount(value):
