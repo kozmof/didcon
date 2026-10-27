@@ -28,6 +28,18 @@ directory. Setup refuses an existing `.devcontainer` directory. Use
 | `bind` (default) | Trusted host checkout | Shares project files with the host and protects selected control paths. |
 | `volume` | Untrusted development | Seeds a named volume from committed host HEAD. Uncommitted host files are excluded. Export commits for review before using them on the host. |
 
+In bind mode, setup also asks whether to create empty `.gitmodules` files when missing.
+The default is no. Existing `.gitmodules` files are always protected. Enable creation
+for scripted installs by setting `DIDCON_CREATE_GITMODULES=true`.
+
+```sh
+DIDCON_CREATE_GITMODULES=true /tmp/didcon/setup.sh /path/to/your/project
+```
+
+Preparation saves this choice for later runs. See
+[bind-mode protection](.devcontainer/docs/hardening.md#bind-mode-protection-and-dependency-volumes)
+for host preparation options.
+
 Bind mode requires a conventional `.git` directory and supported initialized submodules.
 It rejects linked worktrees and Git layouts that need additional protection. See
 [workspace choices](.devcontainer/docs/hardening.md#workspace-choices).

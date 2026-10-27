@@ -310,9 +310,20 @@ denial still needs validation after attach/reconnect on each supported IDE/host.
 ## Bind-mode protection and dependency volumes
 
 Preparation protects `.devcontainer`, `.vscode`, `.git/info`, Git config/hooks, the
-root `.devcontainer.json` placeholder or existing file, `.gitmodules`, and initialized
-submodules' Git pointer and control files. It creates missing placeholder directories
-and empty `.gitmodules` files on the host.
+root `.devcontainer.json` placeholder or existing file, existing `.gitmodules` files,
+and initialized submodules' Git pointer and control files. It creates missing
+placeholder directories on the host.
+
+Creating empty `.gitmodules` files is optional and defaults to no in `setup.sh`.
+Answer yes at the prompt or set `DIDCON_CREATE_GITMODULES=true` before setup to create
+and protect missing files in the root repository and initialized submodules.
+For direct host preparation, use `--create-gitmodules` to enable creation or
+`--no-create-gitmodules` to disable it. Preparation saves the choice for later runs.
+Existing files are retained and protected with either setting.
+
+A missing `.gitmodules` has no read-only file mount. After adding or removing one,
+review the layout on the host, rerun preparation, and rebuild. Startup checks reject
+these changes until the manifest is regenerated.
 
 Each ancestor directory of a protected Git path is also anchored by a writable bind
 mount. This prevents renaming a parent and replacing the entire directory tree. Objects,

@@ -17,7 +17,7 @@ class DistributionTests(unittest.TestCase):
             env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
             env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
                        DIDCON_WORKSPACE_MODE='bind', DIDCON_EGRESS_MODE='proxy',
-                       DIDCON_COMPOSE_PROJECT_NAME='custom-project')
+                       DIDCON_COMPOSE_PROJECT_NAME='custom-project', DIDCON_CREATE_GITMODULES='true')
             subprocess.run(['git', 'init', '-q', str(root)], env=env, check=True)
             subprocess.run(['bash', str(ROOT / 'setup.sh'), str(root)], env=env, check=True, capture_output=True)
             config = root / '.devcontainer/devcontainer.json'
@@ -25,6 +25,8 @@ class DistributionTests(unittest.TestCase):
             self.assertEqual(json.loads(before)['service'], 'devcontainer')
             state = json.loads((root / '.devcontainer/didcon-manifest.json').read_text())
             self.assertEqual(state['environment']['DISPLAY'], 'disabled')
+            self.assertTrue(state['create_gitmodules'])
+            self.assertEqual((root / '.gitmodules').read_text(), '')
             compose_path = root / '.devcontainer/compose.generated.json'
             compose_before = compose_path.read_bytes()
             self.assertEqual(json.loads(compose_before)['name'], 'custom-project')
@@ -43,6 +45,7 @@ class DistributionTests(unittest.TestCase):
             self.assertEqual(approvals.read_bytes(), approved)
             subprocess.run(['python3', str(root / '.devcontainer/host/prepare.py'), '--egress', 'proxy', str(root)], check=True, capture_output=True)
             self.assertEqual(compose_before, compose_path.read_bytes())
+            self.assertTrue(json.loads((root / '.devcontainer/didcon-manifest.json').read_text())['create_gitmodules'])
             subprocess.run(['python3', str(root / '.devcontainer/host/prepare.py'), '--check', str(root)], check=True, capture_output=True)
 
     def test_invalid_compose_project_name_is_rejected_before_installation(self):
@@ -60,7 +63,8 @@ class DistributionTests(unittest.TestCase):
 
     def test_blank_compose_project_name_uses_normalized_repository_directory(self):
         with tempfile.TemporaryDirectory(prefix='didcon-repository-name-') as directory:
-            env = dict(os.environ, DIDCON_COMPOSE_PROJECT_NAME='',
+            env = {key: value for key, value in os.environ.items() if key != 'DIDCON_CREATE_GITMODULES'}
+            env.update(DIDCON_COMPOSE_PROJECT_NAME='',
                        DIDCON_WORKSPACE_MODE='bind', DIDCON_EGRESS_MODE='proxy')
             for repository, expected in (('My Repo.Name', 'my-repo-name'),
                                          ('___Repo', 'repo'), ('---', 'didcon')):
@@ -74,8 +78,22 @@ class DistributionTests(unittest.TestCase):
                     state = json.loads((root / '.devcontainer/didcon-manifest.json').read_text())
                     self.assertEqual(compose['name'], expected)
                     self.assertEqual(state['compose_project_name'], expected)
+                    self.assertFalse(state['create_gitmodules'])
+                    self.assertFalse((root / '.gitmodules').exists())
+                    self.assertFalse(any(mount['target'] == '/workspace/.gitmodules'
+                                         for mount in compose['services']['devcontainer']['volumes']))
                     subprocess.run(['python3', str(root / '.devcontainer/host/prepare.py'), '--check', str(root)],
                                    check=True, capture_output=True)
+
+    def test_invalid_gitmodules_option_is_rejected_before_installation(self):
+        with tempfile.TemporaryDirectory(prefix='didcon-invalid-gitmodules-') as directory:
+            root = Path(directory)
+            env = dict(os.environ, DIDCON_CREATE_GITMODULES='invalid')
+            result = subprocess.run(['bash', str(ROOT / 'setup.sh'), str(root)],
+                                    env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('DIDCON_CREATE_GITMODULES must be true or false', result.stderr)
+            self.assertFalse((root / '.devcontainer').exists())
 
     def test_volume_install_requires_a_reviewed_commit(self):
         with tempfile.TemporaryDirectory(prefix='didcon-volume-install-') as directory:
@@ -93,13 +111,13 @@ class DistributionTests(unittest.TestCase):
             source.mkdir()
             target.mkdir()
             env = dict(os.environ, DIDCON_WORKSPACE_MODE='bind', DIDCON_EGRESS_MODE='proxy',
-                       DIDCON_COMPOSE_PROJECT_NAME='')
+                       DIDCON_COMPOSE_PROJECT_NAME='', DIDCON_CREATE_GITMODULES='false')
             for root in (source, target):
                 subprocess.run(['git', 'init', '-q', str(root)], check=True)
             shutil.copy(ROOT / 'setup.sh', source / 'setup.sh')
             shutil.copytree(ROOT / '.devcontainer', source / '.devcontainer', ignore=shutil.ignore_patterns('__pycache__'))
             subprocess.run(['python3', str(source / '.devcontainer/host/prepare.py'), '--egress', 'proxy',
-                            '--compose-project-name', 'source-only', str(source)], check=True, capture_output=True)
+                            '--compose-project-name', 'source-only', '--create-gitmodules', str(source)], check=True, capture_output=True)
             (source / '.devcontainer/socket-allowlist.json').write_text('{"version":1,"sockets":["/tmp/source-only.sock"]}\n')
             subprocess.run(['bash', str(source / 'setup.sh'), str(target)], env=env, check=True, capture_output=True)
             state = json.loads((target / '.devcontainer/didcon-manifest.json').read_text())
@@ -108,6 +126,8 @@ class DistributionTests(unittest.TestCase):
             self.assertEqual(state['compose_project_name'], 'target')
             compose = json.loads((target / '.devcontainer/compose.generated.json').read_text())
             self.assertEqual(compose['name'], 'target')
+            self.assertFalse((target / '.gitmodules').exists())
+            self.assertFalse(state['create_gitmodules'])
             self.assertFalse((target / '.devcontainer/socket-allowlist.json').exists())
             subprocess.run(['python3', str(target / '.devcontainer/host/prepare.py'), '--check', str(target)], check=True, capture_output=True)
 

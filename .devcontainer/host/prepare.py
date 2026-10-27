@@ -85,7 +85,7 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def inventory(root, create=False):
+def inventory(root, create=False, create_gitmodules=False):
     if (root / ".git").is_file():
         raise PreparationError("Linked worktrees and external Git directories are not supported in bind mode; use volume mode.")
     checked_path(root, ".git", "directory")
@@ -112,7 +112,10 @@ def inventory(root, create=False):
         protect(f"{relative_gitdir}/hooks", "directory", True)
         protect(f"{relative_gitdir}/info", "directory", True)
         module_file = (worktree / ".gitmodules").relative_to(root).as_posix()
-        module_path = protect(module_file, "file", True)
+        module_path = worktree / ".gitmodules"
+        if not create_gitmodules and not module_path.exists() and not module_path.is_symlink():
+            return
+        module_path = protect(module_file, "file", create_gitmodules)
         modules[module_file] = digest(module_path)
         for _, value in git_config(module_path, r"^submodule\..*\.path$"):
             relative_path(value)
@@ -241,7 +244,7 @@ def seed_bundle(root):
     return {"commit": commit.stdout.strip(), "sha256": digest(destination)}
 
 
-def configure(root, dependencies, mode=None, egress=None, compose_project_name=None):
+def configure(root, dependencies, mode=None, egress=None, compose_project_name=None, create_gitmodules=None):
     manifest_path = root / MANIFEST
     checked_path(root, ".devcontainer/devcontainer.json", "file")
     config = read_jsonc(root / ".devcontainer/devcontainer.json")
@@ -261,7 +264,9 @@ def configure(root, dependencies, mode=None, egress=None, compose_project_name=N
             raise PreparationError("Compose project name requires proxy egress mode")
     selected = mode or previous.get("mode", "bind")
     if selected == "bind":
-        state = inventory(root, create=True)
+        create_gitmodules = previous.get("create_gitmodules", False) if create_gitmodules is None else create_gitmodules
+        state = inventory(root, create=True, create_gitmodules=create_gitmodules)
+        state["create_gitmodules"] = create_gitmodules
         if previous.get("mode") == "volume":
             raise PreparationError("Switching volume mode to bind mode requires a separate reviewed setup directory")
         config["workspaceMount"] = "source=${localWorkspaceFolder},target=/workspace,type=bind"
@@ -351,12 +356,12 @@ def verify(root):
             raise PreparationError("Reviewed seed bundle changed; regenerate it explicitly on the host")
         actual = expected.copy()
     else:
-        actual = inventory(root)
+        actual = inventory(root, create_gitmodules=expected.get("create_gitmodules", False))
     actual["dependencies"] = expected.get("dependencies", [])
     actual["egress"] = expected.get("egress", "firewall")
     actual["identity"] = hashlib.sha256(str(root).encode()).hexdigest()[:16]
     actual["template"] = expected["template"]
-    for key in ("build", "environment", "custom_mounts", "compose_sha256", "compose_project_name"):
+    for key in ("build", "environment", "custom_mounts", "compose_sha256", "compose_project_name", "create_gitmodules"):
         if key in expected:
             actual[key] = expected[key]
     validate_dependencies(root, actual["dependencies"])
@@ -386,6 +391,8 @@ def main():
     parser.add_argument("--mode", choices=("bind", "volume"), help="Trusted bind workspace or isolated volume workspace")
     parser.add_argument("--egress", choices=("firewall", "proxy"), help="Legacy in-container IP firewall or external TLS-inspecting proxy")
     parser.add_argument("--compose-project-name", help="Docker Compose group name for proxy mode (default: preserve the saved name or use didcon-<hash>)")
+    parser.add_argument("--create-gitmodules", action=argparse.BooleanOptionalAction,
+                        help="Create and protect missing .gitmodules files in bind mode (default: preserve the saved choice or leave missing files absent)")
     parser.add_argument("project", type=Path)
     args = parser.parse_args()
     root = args.project.resolve()
@@ -401,7 +408,7 @@ def main():
         elif args.check:
             verify(root)
         else:
-            configure(root, args.dependencies, args.mode, args.egress, args.compose_project_name)
+            configure(root, args.dependencies, args.mode, args.egress, args.compose_project_name, args.create_gitmodules)
     except (PreparationError, OSError, ValueError) as error:
         print(f"[didcon] {error}", file=sys.stderr)
         return 1

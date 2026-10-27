@@ -8,6 +8,7 @@
 #
 #   TARGET_DIR  Directory to install .devcontainer into (default: current directory)
 #   DIDCON_COMPOSE_PROJECT_NAME  Optional Docker Compose group name (default: repository directory name)
+#   DIDCON_CREATE_GITMODULES     Create missing .gitmodules files in bind mode (true / false, default: false)
 #
 # Example:
 #   git clone <this-repo> /tmp/didcon
@@ -72,8 +73,10 @@ VARIANT_CONTEXT=""
 WORKSPACE_MODE="${DIDCON_WORKSPACE_MODE:-bind}"
 EGRESS_MODE="${DIDCON_EGRESS_MODE:-proxy}"
 PROJECT_NAME="${DIDCON_COMPOSE_PROJECT_NAME:-}"
+CREATE_GITMODULES="${DIDCON_CREATE_GITMODULES:-false}"
 case "$WORKSPACE_MODE" in bind|volume) ;; *) echo "Error: DIDCON_WORKSPACE_MODE must be bind or volume." >&2; exit 1 ;; esac
 case "$EGRESS_MODE" in firewall|proxy) ;; *) echo "Error: DIDCON_EGRESS_MODE must be firewall or proxy." >&2; exit 1 ;; esac
+case "$CREATE_GITMODULES" in true|false) ;; *) echo "Error: DIDCON_CREATE_GITMODULES must be true or false." >&2; exit 1 ;; esac
 
 valid_project_name() {
   [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]]
@@ -192,6 +195,22 @@ if [ -n "$TTY" ]; then
   done
 fi
 
+if [ -n "$TTY" ] && [ "$WORKSPACE_MODE" = bind ]; then
+  default_gitmodules_reply=no
+  [ "$CREATE_GITMODULES" = true ] && default_gitmodules_reply=yes
+  echo "Existing .gitmodules files are always protected in bind mode."
+  while true; do
+    printf 'Create empty .gitmodules files when missing? [%s] (yes / no): ' "$default_gitmodules_reply"
+    IFS= read -r reply <"$TTY" || reply=""
+    [ -n "$reply" ] || reply="$default_gitmodules_reply"
+    case "$reply" in
+      y|Y|yes|true) CREATE_GITMODULES=true; break ;;
+      n|N|no|false) CREATE_GITMODULES=false; break ;;
+      *) echo "  Please answer yes or no." ;;
+    esac
+  done
+fi
+
 cp -r "$SCRIPT_DIR/.devcontainer" "$TARGET_DIR/.devcontainer"
 # A prepared source checkout may contain project-specific generated state.
 if [ -f "$TARGET_DIR/.devcontainer/didcon-manifest.json" ]; then
@@ -242,6 +261,13 @@ PREPARE_ARGS=(--mode "$WORKSPACE_MODE" --egress "$EGRESS_MODE")
 if [ -n "$PROJECT_NAME" ]; then
   PREPARE_ARGS+=(--compose-project-name "$PROJECT_NAME")
 fi
+if [ "$WORKSPACE_MODE" = bind ]; then
+  if [ "$CREATE_GITMODULES" = true ]; then
+    PREPARE_ARGS+=(--create-gitmodules)
+  else
+    PREPARE_ARGS+=(--no-create-gitmodules)
+  fi
+fi
 python3 "$TARGET_DIR/.devcontainer/host/prepare.py" "${PREPARE_ARGS[@]}" "$TARGET_DIR"
 
 echo "Placed .devcontainer at $TARGET_DIR/.devcontainer"
@@ -249,5 +275,8 @@ echo "  name:       $NAME"
 echo "  dockerfile: $VARIANT_PATH"
 echo "  workspace:  $WORKSPACE_MODE"
 echo "  egress:     $EGRESS_MODE"
+if [ "$WORKSPACE_MODE" = bind ]; then
+  echo "  create .gitmodules: $CREATE_GITMODULES"
+fi
 [ -n "$VARIANT_CONTEXT" ] && echo "  context:    $VARIANT_CONTEXT"
 exit 0

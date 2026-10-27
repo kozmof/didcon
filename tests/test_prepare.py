@@ -35,9 +35,9 @@ class PreparationTests(unittest.TestCase):
                                "-c", "commit.gpgSign=false", "-c", "protocol.file.allow=always", *args],
                               cwd=cwd, env=self.env, check=True, capture_output=True, text=True).stdout
 
-    def configure(self, dependencies=None):
+    def configure(self, dependencies=None, **options):
         with contextlib.redirect_stdout(io.StringIO()):
-            prepare.configure(self.root, dependencies)
+            prepare.configure(self.root, dependencies, **options)
 
     def verify(self):
         with contextlib.redirect_stdout(io.StringIO()):
@@ -71,6 +71,62 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(before, (self.root / ".devcontainer/devcontainer.json").read_bytes())
         self.assertTrue((self.root / ".devcontainer.json").is_dir())
         self.assertTrue(any("/workspace/node_modules,type=volume" in m for m in self.config()["mounts"]))
+        self.assertFalse((self.root / ".gitmodules").exists())
+        self.assertFalse(any("target=/workspace/.gitmodules," in m for m in self.config()["mounts"]))
+
+    def test_gitmodules_creation_is_opt_in_and_saved_for_regeneration(self):
+        self.configure(create_gitmodules=True)
+        module_path = self.root / ".gitmodules"
+        self.assertEqual(module_path.read_text(), "")
+        self.assertIn("source=${localWorkspaceFolder}/.gitmodules,target=/workspace/.gitmodules,type=bind,readonly",
+                      self.config()["mounts"])
+        self.verify()
+        module_path.unlink()
+        with self.assertRaises(prepare.PreparationError):
+            self.verify()
+        self.assertFalse(module_path.exists(), "Startup checks must not recreate missing files")
+        self.configure()
+        self.assertEqual(module_path.read_text(), "")
+        self.verify()
+
+    def test_added_or_removed_gitmodules_requires_host_review(self):
+        self.configure()
+        module_path = self.root / ".gitmodules"
+        module_path.write_text("")
+        with self.assertRaises(prepare.PreparationError):
+            self.verify()
+        self.configure(create_gitmodules=False)
+        self.verify()
+        self.assertIn("source=${localWorkspaceFolder}/.gitmodules,target=/workspace/.gitmodules,type=bind,readonly",
+                      self.config()["mounts"])
+        module_path.unlink()
+        with self.assertRaises(prepare.PreparationError):
+            self.verify()
+        self.configure()
+        self.verify()
+        self.assertFalse(module_path.exists())
+
+    def test_existing_gitmodules_in_legacy_manifests_remains_protected(self):
+        self.configure(create_gitmodules=True)
+        state = json.loads((self.root / prepare.MANIFEST).read_text())
+        state.pop("create_gitmodules")
+        prepare.atomic_json(self.root / prepare.MANIFEST, state)
+        self.verify()
+        self.configure()
+        self.verify()
+        self.assertTrue((self.root / ".gitmodules").is_file())
+
+    def test_optional_gitmodules_rejects_broken_symlinks_and_hardlinks(self):
+        module_path = self.root / ".gitmodules"
+        module_path.symlink_to(self.root / "missing")
+        with self.assertRaisesRegex(prepare.PreparationError, "Symlink"):
+            self.configure()
+        module_path.unlink()
+        alias = self.root / "module-alias"
+        alias.write_text("")
+        os.link(alias, module_path)
+        with self.assertRaisesRegex(prepare.PreparationError, "hardlink"):
+            self.configure()
 
     def test_normal_git_commit_still_works(self):
         self.configure()
@@ -84,9 +140,14 @@ class PreparationTests(unittest.TestCase):
         self.configure()
         state = json.loads((self.root / prepare.MANIFEST).read_text())
         self.assertIn("sub/.git", state["protected"])
+        self.assertIn(".gitmodules", state["protected"])
+        self.assertFalse((self.root / "sub/.gitmodules").exists())
         self.assertIn(".git/modules/sub/config", state["protected"])
         self.assertNotIn(".git/modules/sub/index", state["protected"])
         self.assertTrue({".git", ".git/modules", ".git/modules/sub", "sub"}.issubset(state["anchors"]))
+        self.verify()
+        self.configure(create_gitmodules=True)
+        self.assertEqual((self.root / "sub/.gitmodules").read_text(), "")
         self.verify()
         (self.root / "sub/.git").write_text("gitdir: ../.git/modules/sub\n\n")
         with self.assertRaises(prepare.PreparationError):
