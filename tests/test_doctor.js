@@ -112,6 +112,28 @@ test('tool inventory extracts complete Node and Go versions without copying raw 
   assert.equal(toolVersion('dummy-secret'), undefined);
 });
 
+test('Zig tool inventory uses the version subcommand and reports the installed compiler', async () => {
+  const doctor = new Doctor(parseOptions([]));
+  await doctor.tools({ build: { dockerfile: 'Dockerfile.withZig' } }, async (file, args) => {
+    if (file === '/usr/local/zig/zig') {
+      // Zig rejects --version. Match its CLI rather than accepting every probe.
+      const ok = args.length === 1 && args[0] === 'version';
+      return { ok, stdout: ok ? '0.16.0\n' : '' };
+    }
+    return { ok: true, stdout: '1.2.3\n' };
+  });
+  const zig = doctor.report.checks.find(check => check.id === 'tool.zig');
+  assert.equal(zig.status, 'pass');
+  assert.equal(zig.message, 'zig 0.16.0');
+});
+
+test('an unavailable compiler still fails the Zig variant tool inventory', async () => {
+  const doctor = new Doctor(parseOptions([]));
+  await doctor.tools({ build: { dockerfile: 'Dockerfile.withZig' } }, async file =>
+    file === '/usr/local/zig/zig' ? { ok: false, stdout: '', errorCode: 'ENOENT' } : { ok: true, stdout: '1.2.3\n' });
+  assert.equal(doctor.report.checks.find(check => check.id === 'tool.zig').status, 'fail');
+});
+
 test('command runner bounds output and terminates commands that exceed their deadline', async () => {
   const timeout = await runCommand(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: os.tmpdir(), timeout: 150 });
   assert.equal(timeout.ok, false);

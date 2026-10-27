@@ -307,7 +307,7 @@ class Doctor {
     return this.report;
   }
 
-  async tools(manifest) {
+  async tools(manifest, command = runCommand) {
     const dockerfile = manifest.build?.dockerfile || manifest.template?.build?.dockerfile || '';
     const tools = ['node', 'npm', 'npx', 'pnpm', 'git', 'claude', 'codex', 'island'].map(name => ({ name, file: name, expected: true }));
     for (const [name, file, marker] of [
@@ -321,7 +321,7 @@ class Doctor {
         this.add('Tools', `tool.${tool.name}`, 'skip', `${tool.name} is optional and not installed`);
         continue;
       }
-      const result = await runCommand(tool.file, tool.name === 'go' ? ['version'] : ['--version'],
+      const result = await command(tool.file, ['go', 'zig'].includes(tool.name) ? ['version'] : ['--version'],
         { env: { ...process.env, GOTOOLCHAIN: 'local' } });
       const version = toolVersion(result.stdout);
       this.add('Tools', `tool.${tool.name}`, result.ok && version ? 'pass' : 'fail',
