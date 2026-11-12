@@ -115,9 +115,11 @@ function readLimits(read = filename => fs.readFileSync(filename, 'utf8').trim())
     pidsUsed: Number(optional(v2 ? '/sys/fs/cgroup/pids.current' : '/sys/fs/cgroup/pids/pids.current')) };
 }
 
-function proxyEnvironmentIssues(env, identity) {
+function proxyEnvironmentIssues(env, identity, subnetOctet) {
   const issues = [];
-  const octet = /^[0-9a-f]{16}$/.test(identity || '') ? parseInt(identity.slice(0, 2), 16) : null;
+  const octet = subnetOctet !== undefined && subnetOctet !== null
+    ? (Number.isInteger(subnetOctet) && subnetOctet >= 0 && subnetOctet <= 255 ? subnetOctet : null)
+    : /^[0-9a-f]{16}$/.test(identity || '') ? parseInt(identity.slice(0, 2), 16) : null;
   const expected = octet === null ? null : `http://172.30.${octet}.2:443`;
   for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']) {
     if (!expected || env[key] !== expected) issues.push(`${key} differs from the reviewed proxy endpoint`);
@@ -414,7 +416,7 @@ class Doctor {
   }
 
   async trust(manifest) {
-    const issues = proxyEnvironmentIssues(process.env, manifest.identity);
+    const issues = proxyEnvironmentIssues(process.env, manifest.identity, manifest.subnet_octet);
     for (let index = 0; index < issues.length; index++) this.add('Egress', `proxy.environment.${index}`, 'fail', issues[index], 'Restore the generated proxy/trust environment and rebuild.');
     if (!issues.length) this.add('Egress', 'proxy.environment', 'pass', 'Proxy variables and trust-store paths match the reviewed endpoint');
     const insecure = process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0' || /^(1|true|yes)$/i.test(process.env.GIT_SSL_NO_VERIFY || '') ||

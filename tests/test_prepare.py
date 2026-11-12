@@ -29,6 +29,12 @@ class PreparationTests(unittest.TestCase):
         self.git(self.root, "init", "-q")
         (self.root / ".devcontainer").mkdir()
         shutil.copy(ROOT / ".devcontainer/devcontainer.json", self.root / ".devcontainer/devcontainer.json")
+        # Keep subnet selection independent of the host's Docker networks.
+        self.used_subnets = []
+        self.subnet_queries = []
+        original = prepare.docker_subnets
+        prepare.docker_subnets = lambda exclude: self.subnet_queries.append(exclude) or list(self.used_subnets)
+        self.addCleanup(setattr, prepare, "docker_subnets", original)
 
     def git(self, cwd, *args):
         return subprocess.run(["git", "-c", "user.name=Review", "-c", "user.email=review@example.invalid",
@@ -299,6 +305,45 @@ class PreparationTests(unittest.TestCase):
             prepare.configure(self.root, None)
         self.assertEqual(compose_path.read_bytes(), named)
         self.verify()
+
+    def proxy_subnet(self):
+        compose = json.loads((self.root / '.devcontainer/compose.generated.json').read_text())
+        return compose['networks']['isolated']['ipam']['config'][0]['subnet']
+
+    def test_subnet_skips_networks_in_use_and_stays_stable(self):
+        default = prepare.default_octet(prepare.hashlib.sha256(str(self.root.resolve()).encode()).hexdigest()[:16])
+        self.used_subnets = [prepare.ipaddress.ip_network(f'172.30.{default}.0/28'),
+                             prepare.ipaddress.ip_network(f'172.30.{(default + 1) % 256}.0/24')]
+        self.configure(None, mode='bind', egress='proxy', compose_project_name='picked')
+        octet = (default + 2) % 256
+        self.assertEqual(self.subnet_queries, ['picked_isolated'])
+        self.assertEqual(self.proxy_subnet(), f'172.30.{octet}.0/28')
+        compose = json.loads((self.root / '.devcontainer/compose.generated.json').read_text())
+        self.assertEqual(compose['services']['proxy']['networks']['isolated']['ipv4_address'], f'172.30.{octet}.2')
+        self.assertEqual(compose['services']['devcontainer']['environment']['HTTPS_PROXY'], f'http://172.30.{octet}.2:443')
+        self.assertEqual(json.loads((self.root / prepare.MANIFEST).read_text())['subnet_octet'], octet)
+        self.verify()
+        # A saved choice is reviewed topology; later Docker state must not move it.
+        self.used_subnets = [prepare.ipaddress.ip_network('172.30.0.0/16')]
+        self.configure()
+        self.assertEqual(self.proxy_subnet(), f'172.30.{octet}.0/28')
+        self.verify()
+
+    def test_explicit_subnet_octet_overrides_and_is_validated(self):
+        self.configure(None, mode='bind', egress='proxy', subnet_octet=200)
+        self.assertEqual(self.proxy_subnet(), '172.30.200.0/28')
+        self.assertEqual(self.subnet_queries, [])
+        self.verify()
+        for value in (-1, 256, True, '7'):
+            with self.subTest(value=value), self.assertRaisesRegex(prepare.PreparationError, 'Subnet octet'):
+                self.configure(subnet_octet=value)
+        with self.assertRaisesRegex(prepare.PreparationError, 'requires proxy'):
+            self.configure(egress='firewall', subnet_octet=5)
+
+    def test_exhausted_subnet_range_is_rejected(self):
+        self.used_subnets = [prepare.ipaddress.ip_network('172.16.0.0/12')]
+        with self.assertRaisesRegex(prepare.PreparationError, 'No free'):
+            self.configure(None, mode='bind', egress='proxy')
 
     def test_invalid_compose_project_names_are_rejected(self):
         for name in ('', 'Uppercase', '-project', '_project', 'has space', 'has.dot', 'name\n'):

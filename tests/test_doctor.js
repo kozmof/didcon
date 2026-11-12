@@ -50,6 +50,16 @@ test('proxy diagnostics require the reviewed address and never echo endpoint cre
   assert.ok(!JSON.stringify(issues).includes('dummy-secret'));
 });
 
+test('proxy diagnostics prefer the saved subnet octet over the identity hash', () => {
+  const identity = '1234567890abcdef';
+  const proxy = 'http://172.30.201.2:443';
+  const env = { HTTP_PROXY: proxy, HTTPS_PROXY: proxy, http_proxy: proxy, https_proxy: proxy };
+  const proxyIssues = issues => issues.filter(issue => /^(HTTPS?_PROXY|https?_proxy) /.test(issue));
+  assert.deepEqual(proxyIssues(proxyEnvironmentIssues(env, identity, 201)), []);
+  assert.equal(proxyIssues(proxyEnvironmentIssues(env, identity)).length, 4);
+  assert.equal(proxyIssues(proxyEnvironmentIssues(env, identity, 999)).length, 4);
+});
+
 test('preflight aggregation reports known groups and excludes child messages and secrets', () => {
   const output = '==> safe-chain\n[PASS] binary responds\n[FAIL] dummy-secret\n==> Island\n[WARN] dummy-secret\n[PASS] profile present\n==> Summary: 2 passed, 1 failed, 1 warnings\n';
   const parsed = preflightGroups(output);

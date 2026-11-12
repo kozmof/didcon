@@ -6,10 +6,15 @@ from pathlib import Path
 PROXY_IMAGE = "didcon-smokescreen:68e7b8218e22"
 
 
+def default_octet(identity):
+    """Hash-derived third octet; kept as the first choice so existing topologies stay stable."""
+    return int(identity[:2], 16)
+
+
 def generate(root, state, mounts, build, environment):
     identity = hashlib.sha256(str(root).encode()).hexdigest()[:16]
     project = state.get("compose_project_name", "didcon-" + identity)
-    octet = int(identity[:2], 16)
+    octet = state.get("subnet_octet", default_octet(identity))
     subnet = f"172.30.{octet}.0/28"
     proxy_ip = f"172.30.{octet}.2"
     # Keep the image reference valid for all Compose names and stable on rename.

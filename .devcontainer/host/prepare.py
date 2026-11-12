@@ -8,6 +8,7 @@ submodule layout. Python 3.9+ and Git are required on the Docker client host.
 import argparse
 import copy
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -18,7 +19,7 @@ import tempfile
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from compose_config import generate as generate_compose
+from compose_config import default_octet, generate as generate_compose
 
 
 MANIFEST = ".devcontainer/didcon-manifest.json"
@@ -218,6 +219,44 @@ def validate_dependencies(root, paths):
                 raise PreparationError(f"Dependency path is not a directory: {value}")
 
 
+def docker_subnets(exclude):
+    """IPv4 subnets of existing Docker networks other than `exclude`; empty if Docker is unavailable."""
+    try:
+        ids = subprocess.run(["docker", "network", "ls", "-q"], check=True, capture_output=True, text=True).stdout.split()
+        if not ids:
+            return []
+        output = subprocess.run(["docker", "network", "inspect", "--format",
+                                 "{{.Name}}{{range .IPAM.Config}} {{.Subnet}}{{end}}", *ids],
+                                check=True, capture_output=True, text=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    subnets = []
+    for line in output.splitlines():
+        name, *values = line.split()
+        if name == exclude:
+            continue
+        for value in values:
+            try:
+                network = ipaddress.ip_network(value, strict=False)
+            except ValueError:
+                continue
+            if network.version == 4:
+                subnets.append(network)
+    return subnets
+
+
+def select_subnet_octet(identity, network_name):
+    """Prefer the hash-derived octet and probe upward past subnets already held by other networks."""
+    used = docker_subnets(network_name)
+    start = default_octet(identity)
+    for step in range(256):
+        octet = (start + step) % 256
+        candidate = ipaddress.ip_network(f"172.30.{octet}.0/28")
+        if not any(candidate.overlaps(network) for network in used):
+            return octet
+    raise PreparationError("No free 172.30.x.0/28 subnet; pass --subnet-octet after reviewing Docker networks")
+
+
 def seed_bundle(root):
     """Export a reviewed host HEAD without copying local Git control files."""
     destination = root / ".devcontainer/seed.bundle"
@@ -244,7 +283,8 @@ def seed_bundle(root):
     return {"commit": commit.stdout.strip(), "sha256": digest(destination)}
 
 
-def configure(root, dependencies, mode=None, egress=None, compose_project_name=None, create_gitmodules=None):
+def configure(root, dependencies, mode=None, egress=None, compose_project_name=None, create_gitmodules=None,
+              subnet_octet=None):
     manifest_path = root / MANIFEST
     checked_path(root, ".devcontainer/devcontainer.json", "file")
     config = read_jsonc(root / ".devcontainer/devcontainer.json")
@@ -262,6 +302,11 @@ def configure(root, dependencies, mode=None, egress=None, compose_project_name=N
             raise PreparationError("Compose project name must use lowercase letters, digits, hyphens, or underscores and start with a letter or digit")
         if selected_egress != "proxy":
             raise PreparationError("Compose project name requires proxy egress mode")
+    if subnet_octet is not None:
+        if isinstance(subnet_octet, bool) or not isinstance(subnet_octet, int) or not 0 <= subnet_octet <= 255:
+            raise PreparationError("Subnet octet must be an integer from 0 to 255")
+        if selected_egress != "proxy":
+            raise PreparationError("Subnet octet requires proxy egress mode")
     selected = mode or previous.get("mode", "bind")
     if selected == "bind":
         create_gitmodules = previous.get("create_gitmodules", False) if create_gitmodules is None else create_gitmodules
@@ -326,6 +371,11 @@ def configure(root, dependencies, mode=None, egress=None, compose_project_name=N
         state["build"] = build
         state["environment"] = config.get("containerEnv", previous.get("environment", {}))
         state["custom_mounts"] = mounts or previous.get("custom_mounts", [])
+        if subnet_octet is None:
+            subnet_octet = previous.get("subnet_octet")
+        if subnet_octet is None:
+            subnet_octet = select_subnet_octet(identity, (project_name or "didcon-" + identity) + "_isolated")
+        state["subnet_octet"] = subnet_octet
         compose = generate_compose(root, state, state["custom_mounts"] + managed_mounts(state), build, state["environment"])
         compose_path = root / ".devcontainer/compose.generated.json"
         atomic_json(compose_path, compose)
@@ -361,7 +411,8 @@ def verify(root):
     actual["egress"] = expected.get("egress", "firewall")
     actual["identity"] = hashlib.sha256(str(root).encode()).hexdigest()[:16]
     actual["template"] = expected["template"]
-    for key in ("build", "environment", "custom_mounts", "compose_sha256", "compose_project_name", "create_gitmodules"):
+    for key in ("build", "environment", "custom_mounts", "compose_sha256", "compose_project_name", "create_gitmodules",
+                "subnet_octet"):
         if key in expected:
             actual[key] = expected[key]
     validate_dependencies(root, actual["dependencies"])
@@ -393,6 +444,8 @@ def main():
     parser.add_argument("--compose-project-name", help="Docker Compose group name for proxy mode (default: preserve the saved name or use didcon-<hash>)")
     parser.add_argument("--create-gitmodules", action=argparse.BooleanOptionalAction,
                         help="Create and protect missing .gitmodules files in bind mode (default: preserve the saved choice or leave missing files absent)")
+    parser.add_argument("--subnet-octet", type=int,
+                        help="Third octet of the proxy network 172.30.x.0/28 (default: preserve the saved value or pick a free one)")
     parser.add_argument("project", type=Path)
     args = parser.parse_args()
     root = args.project.resolve()
@@ -408,7 +461,8 @@ def main():
         elif args.check:
             verify(root)
         else:
-            configure(root, args.dependencies, args.mode, args.egress, args.compose_project_name, args.create_gitmodules)
+            configure(root, args.dependencies, args.mode, args.egress, args.compose_project_name, args.create_gitmodules,
+                      args.subnet_octet)
     except (PreparationError, OSError, ValueError) as error:
         print(f"[didcon] {error}", file=sys.stderr)
         return 1

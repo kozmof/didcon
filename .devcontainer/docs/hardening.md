@@ -474,8 +474,11 @@ including its tests, run the following command.
 docker build -t didcon-smokescreen:68e7b8218e22 .devcontainer/egress
 ```
 
-Generated networks use a project-derived `172.30.x.0/28` subnet. Resolve address
-conflicts by changing the reviewed generator policy and regenerating the configuration.
+Generated networks use a `172.30.x.0/28` subnet. On first proxy generation, `prepare.py`
+prefers the project-derived octet and probes upward past subnets held by other Docker
+networks, then records the choice as `subnet_octet` in the manifest so regeneration keeps
+it stable. Resolve later address conflicts by rerunning `prepare.py --subnet-octet N`
+on the host and rebuilding.
 Startup rejects direct edits to generated topology. Docker Compose owns the project’s
 networks and volumes. Export work before deleting workspace volumes. Deleting proxy keys
 also requires reinitializing the public trust certificate.
